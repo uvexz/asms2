@@ -1,0 +1,1 @@
+ALTER TABLE `provider_config` ADD `external_account_id` text;

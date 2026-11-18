@@ -1,0 +1,140 @@
+import { sql } from 'drizzle-orm'
+import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+/**
+ * Better Auth 表结构（与 better-auth 1.5 的 sqlite/drizzle 约定保持一致）。
+ * 字段名一旦变动会直接影响会话与登录，改动前先跑 `npx @better-auth/cli generate` 对照。
+ */
+
+export const user = sqliteTable('user', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  emailVerified: integer('email_verified', { mode: 'boolean' })
+    .default(false)
+    .notNull(),
+  image: text('image'),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .default(sql`(unixepoch())`)
+    .notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .default(sql`(unixepoch())`)
+    .notNull(),
+
+  // admin plugin
+  role: text('role').default('user'),
+  banned: integer('banned', { mode: 'boolean' }).default(false),
+  banReason: text('ban_reason'),
+  banExpires: integer('ban_expires', { mode: 'timestamp' }),
+
+  // 站点配额覆盖值（NULL 表示跟随 site_settings）
+  mailboxLimit: integer('mailbox_limit'),
+  sendLimit: integer('send_limit'),
+})
+
+export const session = sqliteTable(
+  'session',
+  {
+    id: text('id').primaryKey(),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    token: text('token').notNull().unique(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    impersonatedBy: text('impersonated_by'),
+  },
+  (table) => [index('session_user_id_idx').on(table.userId)],
+)
+
+export const account = sqliteTable(
+  'account',
+  {
+    id: text('id').primaryKey(),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: integer('access_token_expires_at', {
+      mode: 'timestamp',
+    }),
+    refreshTokenExpiresAt: integer('refresh_token_expires_at', {
+      mode: 'timestamp',
+    }),
+    scope: text('scope'),
+    password: text('password'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [index('account_user_id_idx').on(table.userId)],
+)
+
+export const verification = sqliteTable(
+  'verification',
+  {
+    id: text('id').primaryKey(),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [index('verification_identifier_idx').on(table.identifier)],
+)
+
+/** better-auth `apiKey` 插件用表（@better-auth/api-key） */
+export const apikey = sqliteTable(
+  'apikey',
+  {
+    id: text('id').primaryKey(),
+    name: text('name'),
+    start: text('start'),
+    prefix: text('prefix'),
+    key: text('key').notNull(),
+    referenceId: text('reference_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    configId: text('config_id').notNull().default('default'),
+    refillInterval: integer('refill_interval'),
+    refillAmount: integer('refill_amount'),
+    lastRefillAt: integer('last_refill_at', { mode: 'timestamp' }),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true),
+    rateLimitEnabled: integer('rate_limit_enabled', { mode: 'boolean' }).default(
+      true,
+    ),
+    rateLimitTimeWindow: integer('rate_limit_time_window'),
+    rateLimitMax: integer('rate_limit_max'),
+    requestCount: integer('request_count').default(0),
+    remaining: integer('remaining'),
+    lastRequest: integer('last_request', { mode: 'timestamp' }),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    permissions: text('permissions'),
+    metadata: text('metadata'),
+  },
+  (table) => [index('apikey_reference_id_idx').on(table.referenceId)],
+)

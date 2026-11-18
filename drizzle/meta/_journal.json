@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1795011797121,
+      "tag": "0000_wealthy_zaran",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1795013077485,
+      "tag": "0001_fancy_gorgon",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795013282433,
+      "tag": "0002_wise_ser_duncan",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1795014605116,
+      "tag": "0003_glorious_hannibal_king",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795015599825,
+      "tag": "0004_abandoned_the_call",
+      "breakpoints": true
+    }
+  ]
+}
