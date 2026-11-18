@@ -13,3 +13,49 @@ body,
 body {
   margin: 0;
 }
+
+/* ---------------------------------------------------------------------------
+ * Landing motion
+ *
+ * 只有两种：hero 的一次入场、章节滚进视口时的淡入上移。都在
+ * prefers-reduced-motion: no-preference 下才启用；滚动入场额外要求浏览器
+ * 支持 scroll-driven animations（Baseline 2026-10），不支持的浏览器直接
+ * 看到最终状态——纯装饰，不做 JS 兜底。
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes landing-enter {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+  }
+
+  .landing-enter {
+    animation: landing-enter 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @supports ((animation-timeline: view()) and (animation-range: entry)) {
+    @keyframes landing-reveal {
+      from {
+        opacity: 0;
+        transform: translateY(18px);
+      }
+    }
+
+    .landing-reveal {
+      animation: landing-reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 45%;
+    }
+  }
+}
+
+/* 打印时不要留下任何还没滚到的空白章节。 */
+@media print {
+  .landing-enter,
+  .landing-reveal {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
