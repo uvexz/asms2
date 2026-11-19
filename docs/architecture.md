@@ -26,7 +26,7 @@ asms2 是**邮件应用层**，不是邮件传输代理（MTA）：
 | 模块          | 职责                                                | 代码位置                                                           |
 | ------------- | --------------------------------------------------- | ------------------------------------------------------------------ |
 | 用户面板      | 邮箱管理、收发件、筛选、配额、个人设置              | `src/routes/mail*`、`src/routes/settings.tsx`、`components/mail/*` |
-| 管理面板      | 站点、域名、服务商、Webhook、第三方登录、用户、日志 | `src/routes/admin*`、`components/admin/*`                          |
+| 管理面板      | 站点、域名、服务商、Webhook、登录方式、用户、日志 | `src/routes/admin*`、`components/admin/*`                          |
 | 邮件适配层    | 统一收发/域名/Webhook 验签，错误归一                | `src/server/providers/*`                                           |
 | 收件处理      | 验签 → 去重 → 解析收件人 → 拉正文 → 净化 → 入库     | `src/server/webhooks/process.ts`、`src/server/mail/ingest.ts`      |
 | 发件服务      | 校验 → 配额 → 调服务商 → 落库                       | `src/server/mail/send.ts`                                          |
@@ -125,7 +125,7 @@ erDiagram
 
 ### 3.2 表清单
 
-**认证（Better Auth 生成，5 张）**
+**认证（Better Auth 生成，6 张）**
 
 | 表             | 关键字段                                                                    | 说明                                      |
 | -------------- | --------------------------------------------------------------------------- | ----------------------------------------- |
@@ -133,14 +133,15 @@ erDiagram
 | `session`      | id, token(UK), userId, expiresAt, ipAddress, userAgent                      | 会话                                      |
 | `account`      | id, userId, providerId, accountId, password, accessToken…                   | 密码与 OAuth，开启 token 加密             |
 | `verification` | id, identifier, value, expiresAt                                            | 邮箱验证/重置                             |
+| `passkey`      | id, userId, credentialID, publicKey, counter, deviceType, backedUp, aaguid  | `@better-auth/passkey` 插件               |
 | `apikey`       | id, name, start, key(哈希), referenceId, rateLimit*                         | `@better-auth/api-key` 插件               |
 
 **站点（3 张）**
 
 | 表              | 关键字段                                                                                                                                                             | 说明                                    |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `site_settings` | 单行 `default`；站点资料、注册开关、默认配额、前缀长度、`temp_ttl_minutes`（考察期）、`temp_grace_minutes`、冷却时长、`deleted_mailbox_retention_days`、`allow_temp_send`、`admin_can_read_mail`、时区 | typed 单行配置，零散扩展放 `extra_json` |
-| `auth_provider` | providerId(UK), displayName, enabled, clientId, clientSecretEnc, issuer, scopes                                                                                      | 保存后触发 auth 实例重建                |
+| `site_settings` | 单行 `default`；站点资料、注册开关、`email_verification_required`、默认配额、前缀长度、`temp_ttl_minutes`（考察期）、`temp_grace_minutes`、冷却时长、`deleted_mailbox_retention_days`、`allow_temp_send`、`admin_can_read_mail`、时区 | typed 单行配置，零散扩展放 `extra_json` |
+| `auth_provider` | providerId(UK)、displayName、enabled、clientId、clientSecretEnc、issuer、scopes；providerId ∈ email/google/github/oidc/passkey | 登录方式配置，保存后触发 auth 实例重建 |
 | `app_meta`      | key(PK), value                                                                                                                                                       | 配置版本号等                            |
 
 **邮箱与邮件（4 张）**
@@ -202,7 +203,7 @@ erDiagram
 | 资源 / 动作                          | 访客 | 用户                 | 管理员                     |
 | ------------------------------------ | ---- | -------------------- | -------------------------- |
 | 站点公开信息                         | 读   | 读                   | 读写                       |
-| 域名 / 服务商 / Webhook / 第三方登录 | —    | —                    | 读写                       |
+| 域名 / 服务商 / Webhook / 登录方式 | —    | —                    | 读写                       |
 | 创建长期邮箱                         | —    | 受配额（默认 5）     | 受配额                     |
 | 创建临时邮箱                         | —    | 不限量，受频率限制   | 同用户                     |
 | 删除/停用自己的邮箱                  | —    | ✅                   | ✅                         |
@@ -301,13 +302,23 @@ erDiagram
 
 根域已有 MX 时必须用子域，否则整域邮件会被导到 Resend。
 
-### 5.7 第三方登录（动态）
+### 5.7 登录方式（动态）
 
-Better Auth 的 `socialProviders` 在实例创建时固定，因此 `getAuth()` 是带版本号的异步单例：
+登录方式统一存在 `auth_provider`：`email`（邮箱密码，默认开启）、`google`、`github`、`oidc`、`passkey`。
+Better Auth 的 `emailAndPassword` / `socialProviders` / 插件列表在实例创建时固定，因此 `getAuth()` 是带版本号的异步单例：
 
 - 管理面板保存 → `app_meta.auth_config_version` 自增 → 进程内 `invalidateAuthCache()`。
 - 下次请求发现版本变化即重建实例；多实例靠 30s 版本轮询生效。
 - 回调地址固定为 `{BETTER_AUTH_URL}/api/auth/callback/{providerId}`。
+- 至少保留一种启用的方式：停用/删除最后一种由服务端拒绝（409）。
+- 删除方式只删配置行，`account` 里的密码/社交凭证保留；重新添加后仍可登录。
+- Passkey 的 `rpID` / `origin` 取自 `BETTER_AUTH_URL`，因此生产必须使用 HTTPS。
+
+邮箱验证（`site_settings.email_verification_required`）：
+
+- 只影响邮箱密码注册的新用户；开启时会把存量用户回填为已验证，避免全员被锁。
+- 验证邮件复用站点服务商 + 已验证且开启发信的域名（发件人 `noreply@{hostname}`），不占用户配额。
+- 未验证用户仍可登录，但 `/mail`、`/settings`、`/admin` 会重定向到 `/verify-email`。
 
 ## 6. 前端
 
@@ -315,9 +326,10 @@ Better Auth 的 `socialProviders` 在实例创建时固定，因此 `getAuth()` 
 
 | 路由                                                        | 页面                                 |
 | ----------------------------------------------------------- | ------------------------------------ |
-| `/login`、`/register`                                       | 认证（AuthCard + 动态 SocialButton） |
+| `/login`、`/register`                                       | 认证（按站点配置渲染登录方式）       |
+| `/verify-email`                                             | 邮箱验证提醒与重发                   |
 | `/mail`、`/mail/$messageId`                                 | 三栏邮件界面，阅读区可深链           |
-| `/settings`                                                 | 昵称、配额、API Key                  |
+| `/settings`                                                 | 昵称、配额、登录与安全、API Key      |
 | `/admin`、`/admin/{site,domains,providers,auth,users,logs}` | 管理后台                             |
 
 ### 6.2 布局
@@ -329,7 +341,7 @@ Better Auth 的 `socialProviders` 在实例创建时固定，因此 `getAuth()` 
 
 | 界面        | 复用的 BoardUI 组件                                                                    |
 | ----------- | -------------------------------------------------------------------------------------- |
-| 登录 / 注册 | `AuthCard` + `SocialButton` + `Input` + `Button`                                       |
+| 登录 / 注册 | `AuthCard` + `SocialButton` + `LoginMethodButtons` + `Input` + `Button`                |
 | 应用外壳    | `Button` / `IconButton` / `Avatar` / `Counter` / `Dropdown` / `Drawer` / `ThemeToggle` |
 | 新建邮箱    | `Modal` + `SegmentedControl` + `Input` + `Select`                                      |
 | 写信        | `Modal` + `Select` + `Input` + `Textarea` + `Button`                                   |

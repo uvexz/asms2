@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@better-auth/api-key": "^1.7.25",
+    "@better-auth/passkey": "^1.7.26",
     "@internationalized/date": "^3.12.1",
     "@libsql/client": "^0.18.0",
     "@remixicon/react": "^4.9.0",

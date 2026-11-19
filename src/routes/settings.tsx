@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react'
-import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
+import {
+  createFileRoute,
+  getRouteApi,
+  redirect,
+  useNavigate,
+} from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import {
   RiArrowLeftLine,
   RiDeleteBinLine,
   RiFileCopyLine,
+  RiFingerprintLine,
   RiKey2Line,
   RiRefreshLine,
   RiSaveLine,
@@ -13,6 +19,7 @@ import {
 
 import { Button } from '@/components/base/buttons/button'
 import { Chip } from '@/components/base/badges/chip'
+import { Divider } from '@/components/base/divider/divider'
 import { Input } from '@/components/base/input/input'
 import { Select, SelectItem } from '@/components/base/select/select'
 import { Spinner } from '@/components/base/spinner/spinner'
@@ -28,10 +35,18 @@ import {
   updateTelegramNotifyFn,
 } from '#/server/fns/telegram'
 
+const rootApi = getRouteApi('__root__')
+
 export const Route = createFileRoute('/settings')({
   beforeLoad: ({ context }) => {
     if (!context.session) {
       throw redirect({ to: '/login' })
+    }
+    if (
+      context.session.emailVerificationRequired &&
+      !context.session.emailVerified
+    ) {
+      throw redirect({ to: '/verify-email' })
     }
   },
   component: SettingsPage,
@@ -200,6 +215,8 @@ function SettingsPage() {
           />
         </div>
       </PageSection>
+
+      <SecuritySection />
 
       <TelegramSection />
 
@@ -495,6 +512,194 @@ function TelegramSection() {
           )}
         </div>
       ) : null}
+    </PageSection>
+  )
+}
+
+/* ---------------------------------------------------------- login & security */
+
+interface PasskeyRow {
+  id: string
+  name?: string | null
+  createdAt?: string | Date | null
+}
+
+function SecuritySection() {
+  const { auth } = rootApi.useLoaderData()
+  const { session } = Route.useRouteContext()
+  const passkeyEnabled = auth.passkey.enabled
+  const verificationRequired = auth.emailPassword.verificationRequired
+
+  const [passkeys, setPasskeys] = useState<PasskeyRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [name, setName] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [supported, setSupported] = useState(true)
+
+  useEffect(() => {
+    setSupported(
+      typeof window !== 'undefined' &&
+        typeof window.PublicKeyCredential !== 'undefined' &&
+        Boolean(window.isSecureContext),
+    )
+  }, [])
+
+  async function loadPasskeys() {
+    setLoading(true)
+    const result = await authClient.passkey.listUserPasskeys()
+    setLoading(false)
+    if (result.error) return
+    setPasskeys(result.data)
+  }
+
+  useEffect(() => {
+    if (passkeyEnabled) void loadPasskeys()
+  }, [passkeyEnabled])
+
+  async function addPasskey() {
+    setAdding(true)
+    const result = await authClient.passkey.addPasskey({
+      name: name.trim() || undefined,
+    })
+    setAdding(false)
+    if (result.error) {
+      toast.error(result.error.message ?? '绑定 Passkey 失败')
+      return
+    }
+    toast.success('Passkey 已绑定')
+    setName('')
+    await loadPasskeys()
+  }
+
+  async function removePasskey(id: string) {
+    const result = await authClient.passkey.deletePasskey({ id })
+    if (result.error) {
+      toast.error(result.error.message ?? '删除失败')
+      return
+    }
+    setPasskeys((prev) => prev.filter((item) => item.id !== id))
+    toast.success('Passkey 已删除')
+  }
+
+  async function resendVerification() {
+    setSending(true)
+    const { error } = await authClient.sendVerificationEmail({
+      email: session?.email ?? '',
+      callbackURL: '/verify-email?verified=1',
+    })
+    setSending(false)
+    if (error) {
+      toast.error(error.message ?? '发送失败，请稍后再试')
+      return
+    }
+    toast.success('验证邮件已发送')
+  }
+
+  return (
+    <PageSection title="登录与安全" description="邮箱验证状态与 Passkey">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-body-regular text-text-primary">邮箱验证</span>
+          <Chip color={session?.emailVerified ? 'lime' : 'yellow'}>
+            {session?.emailVerified ? '已验证' : '未验证'}
+          </Chip>
+        </div>
+        {verificationRequired && !session?.emailVerified ? (
+          <Button
+            size="small"
+            variant="secondary"
+            onClick={() => void resendVerification()}
+            disabled={sending}
+          >
+            {sending ? '发送中…' : '发送验证邮件'}
+          </Button>
+        ) : null}
+      </div>
+      {!verificationRequired ? (
+        <p className="mt-1 text-caption-1-regular text-text-tertiary">
+          站点未开启邮箱验证。
+        </p>
+      ) : null}
+
+      <div className="my-4">
+        <Divider />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <RiFingerprintLine
+          className="size-4 text-foreground-icon-primary"
+          aria-hidden
+        />
+        <span className="text-body-regular text-text-primary">Passkey</span>
+      </div>
+
+      {!passkeyEnabled ? (
+        <p className="mt-2 text-caption-1-regular text-text-tertiary">
+          管理员尚未启用 Passkey 登录。
+        </p>
+      ) : !supported ? (
+        <p className="mt-2 text-caption-1-regular text-text-tertiary">
+          当前浏览器或环境不支持 Passkey（需要 HTTPS 或 localhost）。
+        </p>
+      ) : (
+        <>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <Input
+              label="名称"
+              placeholder="MacBook Touch ID"
+              value={name}
+              onChange={setName}
+              className="max-w-xs"
+            />
+            <Button
+              leadingIcon={RiFingerprintLine}
+              onClick={() => void addPasskey()}
+              disabled={adding}
+            >
+              {adding ? '等待验证…' : '添加 Passkey'}
+            </Button>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2">
+            {loading ? (
+              <div className="flex items-center gap-2 text-caption-1-regular text-text-tertiary">
+                <Spinner className="size-4" /> 加载中…
+              </div>
+            ) : null}
+            {!loading && passkeys.length === 0 ? (
+              <p className="text-caption-1-regular text-text-tertiary">
+                还没有绑定 Passkey
+              </p>
+            ) : null}
+            {passkeys.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-border-button-default px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-body-medium text-text-primary">
+                    {item.name || 'Passkey'}
+                  </p>
+                  {item.createdAt ? (
+                    <p className="text-caption-1-regular text-text-tertiary">
+                      绑定于{' '}
+                      {new Date(item.createdAt).toLocaleDateString('zh-CN')}
+                    </p>
+                  ) : null}
+                </div>
+                <Button
+                  size="small"
+                  variant="ghost"
+                  onClick={() => void removePasskey(item.id)}
+                >
+                  <RiDeleteBinLine className="size-4" aria-hidden />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </PageSection>
   )
 }

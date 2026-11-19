@@ -14,6 +14,7 @@ export interface SessionUser {
   name: string
   image?: string | null
   role?: string | null
+  emailVerified?: boolean | null
   mailboxLimit?: number | null
   sendLimit?: number | null
 }

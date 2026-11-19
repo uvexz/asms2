@@ -25,6 +25,12 @@ export const Route = createFileRoute('/mail')({
   },
   beforeLoad: ({ context }) => {
     if (!context.session) throw redirect({ to: '/login' })
+    if (
+      context.session.emailVerificationRequired &&
+      !context.session.emailVerified
+    ) {
+      throw redirect({ to: '/verify-email' })
+    }
   },
   component: MailLayout,
 })

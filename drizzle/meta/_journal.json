@@ -64,6 +64,13 @@
       "when": 1795059931459,
       "tag": "0008_young_network",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1795096597048,
+      "tag": "0009_hard_rumiko_fujikawa",
+      "breakpoints": true
     }
   ]
 }

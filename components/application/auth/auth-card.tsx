@@ -73,6 +73,18 @@ export interface AuthCardProps {
   /** How the provider buttons are arranged. Defaults to `stacked`. */
   layout?: AuthLayout;
   providers?: SocialProvider[];
+  /**
+   * Hide the email + password form (and the CTA) when the site does not offer
+   * the email/password login method. Verification step ignores this.
+   */
+  showEmailForm?: boolean;
+  /**
+   * Replaces the built-in provider buttons, e.g. with OIDC or passkey
+   * methods that have no BrandBadge. Rendered below the divider.
+   */
+  methodsSlot?: ReactNode;
+  /** Adds `webauthn` to autocomplete so passkey conditional UI can attach. */
+  passkeyAutofill?: boolean;
   title?: ReactNode;
   description?: ReactNode;
   /**
@@ -141,6 +153,9 @@ export function AuthCard({
   onResend,
   layout = "stacked",
   providers = ["google", "apple", "github"],
+  showEmailForm = true,
+  methodsSlot,
+  passkeyAutofill = false,
   title,
   description,
   media,
@@ -236,6 +251,7 @@ export function AuthCard({
         </p>
       </div>
 
+      {verify || showEmailForm ? (
       <form onSubmit={submit} className="mt-6 flex flex-col gap-4">
         {verify ? (
           <div className="flex flex-col gap-1.5">
@@ -264,7 +280,7 @@ export function AuthCard({
           type="email"
           label="Email"
           placeholder="you@company.com"
-          autoComplete="email"
+          autoComplete={passkeyAutofill ? "email webauthn" : "email"}
           hint={signup ? "We use this to contact you, and never share it." : undefined}
           isRequired
         />
@@ -298,7 +314,13 @@ export function AuthCard({
             type="password"
             label="Password"
             placeholder={signup ? "At least 8 characters" : "Enter your password"}
-            autoComplete={signup ? "new-password" : "current-password"}
+            autoComplete={
+              signup
+                ? "new-password"
+                : passkeyAutofill
+                  ? "current-password webauthn"
+                  : "current-password"
+            }
             isRequired
           />
         )}
@@ -324,18 +346,21 @@ export function AuthCard({
           </p>
         ) : null}
       </form>
+      ) : null}
 
       {/* Providers always follow the form, in every layout: the email fields
           are the path this card is built around, and a bank of provider
           buttons above them buries the thing people came to fill in. The
           code step shows none — the visitor has already picked a method. */}
-      {!verify && providers.length > 0 ? (
-        <>
-          <div className="my-5">
-            <Divider>or continue with</Divider>
-          </div>
-          {social}
-        </>
+      {!verify && (methodsSlot || providers.length > 0) ? (
+        <div className={showEmailForm ? "mt-5" : "mt-6"}>
+          {showEmailForm ? (
+            <div className="mb-5">
+              <Divider>or continue with</Divider>
+            </div>
+          ) : null}
+          {methodsSlot ?? social}
+        </div>
       ) : null}
 
       {/* Resend is an action, not a destination, so on the code step the

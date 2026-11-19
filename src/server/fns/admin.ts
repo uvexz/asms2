@@ -20,10 +20,11 @@ import {
 } from '#/db/schema'
 import { clientIp, requireAdmin, userAgent } from '#/server/auth/guards'
 import { invalidateAuthCache } from '#/server/auth'
-import { invalidatePublicAuthProviders } from '#/server/auth/public-providers'
+import { invalidatePublicLoginConfig } from '#/server/auth/public-providers'
 import { encryptSecret, last4 } from '#/server/crypto/secret-box'
 import { AppError, attempt } from '#/server/errors'
 import { getProviderById } from '#/server/mail/provider-config'
+import { canSendSystemMail } from '#/server/mail/system'
 import { getProvider } from '#/server/providers'
 import type { DnsRecord } from '#/server/providers'
 import { bumpAuthConfigVersion, getSiteSettings } from '#/server/settings'
@@ -104,7 +105,6 @@ const settingsPatchSchema = z.object({
   icpRecord: z.string().max(200).nullable().optional(),
   footerText: z.string().max(200).nullable().optional(),
   registrationEnabled: z.boolean().optional(),
-  emailVerificationRequired: z.boolean().optional(),
   defaultMailboxLimit: z.number().int().min(0).max(100).optional(),
   defaultDailySendLimit: z.number().int().min(0).max(1000).optional(),
   permanentPrefixMin: z.number().int().min(1).max(32).optional(),
@@ -664,86 +664,272 @@ export const adminDeleteWebhookFn = createServerFn({ method: 'POST' })
     }),
   )
 
-/* ----------------------------------------------------------- auth providers */
+/* ----------------------------------------------------------- login methods */
 
-export const adminListAuthProvidersFn = createServerFn({
+const LOGIN_METHOD_IDS = [
+  'email',
+  'google',
+  'github',
+  'oidc',
+  'passkey',
+] as const
+type LoginMethodId = (typeof LOGIN_METHOD_IDS)[number]
+
+const LOGIN_METHOD_NAMES: Record<LoginMethodId, string> = {
+  email: '邮箱密码',
+  google: 'Google',
+  github: 'GitHub',
+  oidc: '通用 OIDC',
+  passkey: 'Passkey',
+}
+
+const OAUTH_METHOD_IDS = new Set<LoginMethodId>(['google', 'github', 'oidc'])
+
+function isOAuthMethod(id: LoginMethodId) {
+  return OAUTH_METHOD_IDS.has(id)
+}
+
+async function countEnabledMethods() {
+  const rows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(authProvider)
+    .where(eq(authProvider.enabled, true))
+  return Number(rows[0]?.count ?? 0)
+}
+
+async function invalidateLoginMethodCaches() {
+  await bumpAuthConfigVersion()
+  invalidateAuthCache()
+  invalidatePublicLoginConfig()
+}
+
+export const adminListLoginMethodsFn = createServerFn({
   method: 'GET',
 }).handler(async () =>
   attempt(async () => {
     await requireAdmin()
-    const rows = await db
-      .select()
-      .from(authProvider)
-      .orderBy(authProvider.sortOrder)
-    return rows.map((row) => ({
-      ...row,
-      clientSecretEnc: undefined,
-      hasSecret: Boolean(row.clientSecretEnc),
-    }))
+    const [rows, settings, canSend] = await Promise.all([
+      db.select().from(authProvider).orderBy(authProvider.sortOrder),
+      getSiteSettings(true),
+      canSendSystemMail(),
+    ])
+    return {
+      methods: rows.map((row) => ({
+        id: row.id,
+        providerId: row.providerId,
+        displayName: row.displayName,
+        enabled: row.enabled,
+        clientId: row.clientId,
+        hasSecret: Boolean(row.clientSecretEnc),
+        issuer: row.issuer,
+        scopes: row.scopes,
+      })),
+      emailVerification: {
+        enabled: settings.emailVerificationRequired,
+        canSend,
+      },
+    }
   }),
 )
 
-const authProviderSchema = z.object({
-  providerId: z.enum(['google', 'github', 'oidc']),
-  displayName: z.string().min(1).max(40),
-  enabled: z.boolean().default(false),
+const createLoginMethodSchema = z.object({
+  providerId: z.enum(LOGIN_METHOD_IDS),
+  displayName: z.string().min(1).max(40).optional(),
   clientId: z.string().max(300).nullable().optional(),
   clientSecret: z.string().max(300).optional(),
   issuer: z.string().max(300).nullable().optional(),
   scopes: z.string().max(200).nullable().optional(),
 })
 
-export const adminUpsertAuthProviderFn = createServerFn({ method: 'POST' })
-  .validator((data: unknown) => authProviderSchema.parse(data))
+export const adminCreateLoginMethodFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) => createLoginMethodSchema.parse(data))
   .handler(async ({ data }) =>
     attempt(async () => {
       const actor = await requireAdmin()
+
       const existing = (
         await db
-          .select()
+          .select({ id: authProvider.id })
           .from(authProvider)
           .where(eq(authProvider.providerId, data.providerId))
           .limit(1)
       )[0]
+      if (existing) {
+        throw new AppError('conflict', '该登录方式已存在', 409)
+      }
 
-      const values = {
+      if (isOAuthMethod(data.providerId)) {
+        if (!data.clientId?.trim()) {
+          throw new AppError('validation_failed', '请填写 Client ID')
+        }
+        if (!data.clientSecret?.trim()) {
+          throw new AppError('validation_failed', '请填写 Client Secret')
+        }
+        if (data.providerId === 'oidc' && !data.issuer?.trim()) {
+          throw new AppError('validation_failed', '请填写 OIDC Issuer')
+        }
+      }
+
+      const oauth = isOAuthMethod(data.providerId)
+      const id = idPart()
+      await db.insert(authProvider).values({
+        id,
         providerId: data.providerId,
-        displayName: data.displayName,
-        enabled: data.enabled,
-        clientId: data.clientId ?? null,
-        issuer: data.issuer ?? null,
-        scopes: data.scopes ?? null,
+        displayName:
+          data.displayName?.trim() || LOGIN_METHOD_NAMES[data.providerId],
+        enabled: true,
+        clientId: oauth ? (data.clientId?.trim() ?? null) : null,
+        clientSecretEnc:
+          oauth && data.clientSecret ? encryptSecret(data.clientSecret) : null,
+        issuer:
+          data.providerId === 'oidc' ? (data.issuer?.trim() ?? null) : null,
+        scopes: oauth ? data.scopes?.trim() || null : null,
+        sortOrder: LOGIN_METHOD_IDS.indexOf(data.providerId),
+        createdAt: new Date(),
         updatedAt: new Date(),
         updatedBy: actor.id,
-        ...(data.clientSecret
-          ? { clientSecretEnc: encryptSecret(data.clientSecret) }
-          : {}),
-      }
+      })
 
-      if (existing) {
+      await invalidateLoginMethodCaches()
+      await audit(actor.id, 'login_method.create', 'auth_provider', id, {
+        providerId: data.providerId,
+      })
+      return { id, providerId: data.providerId }
+    }),
+  )
+
+export const adminUpdateLoginMethodFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) =>
+    z
+      .object({
+        id: z.string(),
+        enabled: z.boolean().optional(),
+        displayName: z.string().min(1).max(40).optional(),
+        clientId: z.string().max(300).nullable().optional(),
+        clientSecret: z.string().max(300).optional(),
+        issuer: z.string().max(300).nullable().optional(),
+        scopes: z.string().max(200).nullable().optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }) =>
+    attempt(async () => {
+      const actor = await requireAdmin()
+      const row = (
         await db
-          .update(authProvider)
-          .set(values)
-          .where(eq(authProvider.id, existing.id))
-      } else {
-        await db.insert(authProvider).values({
-          id: idPart(),
-          ...values,
-          sortOrder: 0,
-          createdAt: new Date(),
-        })
+          .select()
+          .from(authProvider)
+          .where(eq(authProvider.id, data.id))
+          .limit(1)
+      )[0]
+      if (!row) throw new AppError('not_found', '登录方式不存在', 404)
+
+      if (data.enabled === false && row.enabled) {
+        const enabled = await countEnabledMethods()
+        if (enabled <= 1) {
+          throw new AppError('conflict', '至少保留一种登录方式', 409)
+        }
       }
 
-      await bumpAuthConfigVersion()
-      invalidateAuthCache()
-      invalidatePublicAuthProviders()
+      const oauth = isOAuthMethod(row.providerId as LoginMethodId)
+      const { id, clientSecret, ...rest } = data
+      await db
+        .update(authProvider)
+        .set({
+          ...rest,
+          ...(row.providerId === 'oidc' && data.issuer !== undefined
+            ? { issuer: data.issuer?.trim() || null }
+            : {}),
+          ...(oauth && data.clientId !== undefined
+            ? { clientId: data.clientId?.trim() || null }
+            : {}),
+          ...(clientSecret
+            ? { clientSecretEnc: encryptSecret(clientSecret) }
+            : {}),
+          updatedAt: new Date(),
+          updatedBy: actor.id,
+        })
+        .where(eq(authProvider.id, id))
+
+      await invalidateLoginMethodCaches()
+      await audit(actor.id, 'login_method.update', 'auth_provider', id, {
+        enabled: data.enabled,
+      })
+      return { id }
+    }),
+  )
+
+export const adminDeleteLoginMethodFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) => z.object({ id: z.string() }).parse(data))
+  .handler(async ({ data }) =>
+    attempt(async () => {
+      const actor = await requireAdmin()
+      const row = (
+        await db
+          .select()
+          .from(authProvider)
+          .where(eq(authProvider.id, data.id))
+          .limit(1)
+      )[0]
+      if (!row) throw new AppError('not_found', '登录方式不存在', 404)
+
+      if (row.enabled) {
+        const enabled = await countEnabledMethods()
+        if (enabled <= 1) {
+          throw new AppError('conflict', '至少保留一种登录方式', 409)
+        }
+      }
+
+      await db.delete(authProvider).where(eq(authProvider.id, data.id))
+      await invalidateLoginMethodCaches()
+      await audit(actor.id, 'login_method.delete', 'auth_provider', data.id, {
+        providerId: row.providerId,
+      })
+      return { id: data.id }
+    }),
+  )
+
+export const adminSetEmailVerificationFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) => z.object({ enabled: z.boolean() }).parse(data))
+  .handler(async ({ data }) =>
+    attempt(async () => {
+      const actor = await requireAdmin()
+
+      if (data.enabled && !(await canSendSystemMail())) {
+        throw new AppError(
+          'validation_failed',
+          '请先在「服务商」配置可发信的已验证域名',
+        )
+      }
+
+      await getSiteSettings()
+      await db
+        .update(siteSettings)
+        .set({
+          emailVerificationRequired: data.enabled,
+          updatedAt: new Date(),
+          updatedBy: actor.id,
+        })
+        .where(eq(siteSettings.id, 'default'))
+
+      if (data.enabled) {
+        // 存量账号一律视为已验证，避免开启后被锁在门外；新注册用户从未验证开始
+        await db
+          .update(user)
+          .set({ emailVerified: true, updatedAt: new Date() })
+          .where(eq(user.emailVerified, false))
+      }
+
+      await getSiteSettings(true)
+      await invalidateLoginMethodCaches()
       await audit(
         actor.id,
-        'auth_provider.upsert',
-        'auth_provider',
-        data.providerId,
+        'login_method.email_verification',
+        'site',
+        'default',
+        { enabled: data.enabled },
       )
-      return { providerId: data.providerId }
+      return { enabled: data.enabled }
     }),
   )
 

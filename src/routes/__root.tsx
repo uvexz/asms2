@@ -9,7 +9,7 @@ import { TanStackDevtools } from '@tanstack/react-devtools'
 import { DirectionProvider } from '@/components/foundations/direction/direction'
 import { Toaster } from '@/components/base/toast/toast'
 import {
-  getPublicAuthProvidersFn,
+  getPublicLoginConfigFn,
   getPublicSiteFn,
   getSessionFn,
 } from '#/server/fns/site'
@@ -47,11 +47,15 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
     return { session }
   },
   loader: async () => {
-    const [site, providers] = await Promise.all([
+    const [site, auth] = await Promise.all([
       getPublicSiteFn().catch(() => null),
-      getPublicAuthProvidersFn().catch(() => []),
+      getPublicLoginConfigFn().catch(() => ({
+        emailPassword: { enabled: false, verificationRequired: false },
+        social: [],
+        passkey: { enabled: false },
+      })),
     ])
-    return { site, providers }
+    return { site, auth }
   },
   head: ({ loaderData }) => {
     const faviconUrl = loaderData?.site?.faviconUrl

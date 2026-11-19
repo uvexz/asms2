@@ -1,6 +1,7 @@
 import '#/server/env'
 
 import { apiKey } from '@better-auth/api-key'
+import { passkey } from '@better-auth/passkey'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { APIError } from 'better-auth/api'
@@ -14,16 +15,15 @@ import * as schema from '#/db/schema'
 import { decryptSecret } from '#/server/crypto/secret-box'
 import { getAuthConfigVersion, getSiteSettings } from '#/server/settings'
 
+import { sendVerificationEmail } from './mailer'
+
 export type AuthInstance = ReturnType<typeof betterAuth>
 
 type ProviderRow = typeof schema.authProvider.$inferSelect
 
-async function loadEnabledProviders(): Promise<ProviderRow[]> {
+async function loadAuthProviders(): Promise<ProviderRow[]> {
   try {
-    return await db
-      .select()
-      .from(schema.authProvider)
-      .where(eq(schema.authProvider.enabled, true))
+    return await db.select().from(schema.authProvider)
   } catch {
     // 迁移尚未执行时不阻塞启动
     return []
@@ -50,14 +50,23 @@ async function promoteBootstrapAdmin(userId?: string, email?: string) {
 }
 
 async function buildAuth(): Promise<AuthInstance> {
-  const providers = await loadEnabledProviders()
+  const [rows, settings] = await Promise.all([
+    loadAuthProviders(),
+    getSiteSettings().catch(() => null),
+  ])
+  const methods = new Map(rows.map((row) => [row.providerId, row]))
+  const emailRow = methods.get('email')
+  // 缺行 = 管理员删除了邮箱密码方式；默认行由迁移写入
+  const emailEnabled = emailRow ? emailRow.enabled : false
+  const passkeyEnabled = Boolean(methods.get('passkey')?.enabled)
   const socialProviders: Record<
     string,
     { clientId: string; clientSecret: string }
   > = {}
   const oauthConfigs: Record<string, unknown>[] = []
 
-  for (const provider of providers) {
+  for (const provider of rows) {
+    if (!provider.enabled) continue
     if (!provider.clientId || !provider.clientSecretEnc) continue
     let clientSecret = ''
     try {
@@ -85,26 +94,60 @@ async function buildAuth(): Promise<AuthInstance> {
     }
   }
 
+  const baseURL = process.env.BETTER_AUTH_URL ?? 'http://localhost:3000'
   const plugins: unknown[] = [admin(), apiKey({ enableMetadata: true })]
   if (oauthConfigs.length > 0) {
     plugins.push(genericOAuth({ config: oauthConfigs as never }))
+  }
+  if (passkeyEnabled) {
+    const url = new URL(baseURL)
+    plugins.push(
+      passkey({
+        rpID: url.hostname,
+        rpName: settings?.siteName ?? 'asms2',
+        origin: url.origin,
+      }),
+    )
   }
   // 必须放在最后：它要在响应阶段写 cookie
   plugins.push(tanstackStartCookies())
 
   const options = {
-    baseURL: process.env.BETTER_AUTH_URL ?? 'http://localhost:3000',
+    baseURL,
     secret: process.env.BETTER_AUTH_SECRET,
     database: drizzleAdapter(db, { provider: 'sqlite', schema }),
-    trustedOrigins: [
-      process.env.BETTER_AUTH_URL ?? 'http://localhost:3000',
-      'http://localhost:3000',
-    ],
+    trustedOrigins: [baseURL, 'http://localhost:3000'],
     emailAndPassword: {
-      enabled: true,
+      enabled: emailEnabled,
       minPasswordLength: 8,
       autoSignIn: true,
       requireEmailVerification: false,
+    },
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: true,
+      expiresIn: 60 * 60,
+      sendVerificationEmail: async ({
+        user,
+        url,
+      }: {
+        user: { email: string }
+        url: string
+      }) => {
+        const current = await getSiteSettings()
+        // 开关在请求时读取：管理员关闭后无需重建实例也会停止发信
+        if (!current.emailVerificationRequired) return
+        try {
+          await sendVerificationEmail({
+            siteName: current.siteName,
+            to: user.email,
+            url,
+          })
+        } catch (error) {
+          // 发信失败不能阻断注册；用户可以稍后在验证页重新发送
+          console.error('[asms2] verification email failed:', error)
+        }
+      },
     },
     account: { encryptOAuthTokens: true },
     user: {
@@ -128,8 +171,8 @@ async function buildAuth(): Promise<AuthInstance> {
       user: {
         create: {
           before: async (newUser: { email?: string }) => {
-            const settings = await getSiteSettings().catch(() => null)
-            if (settings && !settings.registrationEnabled) {
+            const current = await getSiteSettings().catch(() => null)
+            if (current && !current.registrationEnabled) {
               throw new APIError('FORBIDDEN', {
                 message: '当前站点已关闭注册，请联系管理员',
               })

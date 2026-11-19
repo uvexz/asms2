@@ -16,6 +16,7 @@ import { Route as MailRouteImport } from './routes/mail'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SiteDotwebmanifestRouteImport } from './routes/site[.]webmanifest'
+import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminAuthRouteImport } from './routes/admin.auth'
 import { Route as AdminDomainsRouteImport } from './routes/admin.domains'
@@ -67,6 +68,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const SiteDotwebmanifestRoute = SiteDotwebmanifestRouteImport.update({
   id: '/site.webmanifest',
   path: '/site.webmanifest',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -164,6 +170,7 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/settings': typeof SettingsRoute
   '/site.webmanifest': typeof SiteDotwebmanifestRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/admin/auth': typeof AdminAuthRoute
   '/admin/domains': typeof AdminDomainsRoute
   '/admin/logs': typeof AdminLogsRoute
@@ -188,6 +195,7 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterRoute
   '/settings': typeof SettingsRoute
   '/site.webmanifest': typeof SiteDotwebmanifestRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/admin/auth': typeof AdminAuthRoute
   '/admin/domains': typeof AdminDomainsRoute
   '/admin/logs': typeof AdminLogsRoute
@@ -215,6 +223,7 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/settings': typeof SettingsRoute
   '/site.webmanifest': typeof SiteDotwebmanifestRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/admin/auth': typeof AdminAuthRoute
   '/admin/domains': typeof AdminDomainsRoute
   '/admin/logs': typeof AdminLogsRoute
@@ -243,6 +252,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/settings'
     | '/site.webmanifest'
+    | '/verify-email'
     | '/admin/auth'
     | '/admin/domains'
     | '/admin/logs'
@@ -267,6 +277,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/settings'
     | '/site.webmanifest'
+    | '/verify-email'
     | '/admin/auth'
     | '/admin/domains'
     | '/admin/logs'
@@ -293,6 +304,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/settings'
     | '/site.webmanifest'
+    | '/verify-email'
     | '/admin/auth'
     | '/admin/domains'
     | '/admin/logs'
@@ -320,6 +332,7 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   SettingsRoute: typeof SettingsRoute
   SiteDotwebmanifestRoute: typeof SiteDotwebmanifestRoute
+  VerifyEmailRoute: typeof VerifyEmailRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiCronSweepRoute: typeof ApiCronSweepRoute
   ApiTelegramWebhookRoute: typeof ApiTelegramWebhookRoute
@@ -378,6 +391,13 @@ declare module '@tanstack/react-router' {
       path: '/site.webmanifest'
       fullPath: '/site.webmanifest'
       preLoaderRoute: typeof SiteDotwebmanifestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify-email': {
+      id: '/verify-email'
+      path: '/verify-email'
+      fullPath: '/verify-email'
+      preLoaderRoute: typeof VerifyEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/': {
@@ -546,6 +566,7 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   SettingsRoute: SettingsRoute,
   SiteDotwebmanifestRoute: SiteDotwebmanifestRoute,
+  VerifyEmailRoute: VerifyEmailRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiCronSweepRoute: ApiCronSweepRoute,
   ApiTelegramWebhookRoute: ApiTelegramWebhookRoute,

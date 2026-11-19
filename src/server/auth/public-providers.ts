@@ -1,35 +1,54 @@
 import '#/server/env'
 
-import { eq } from 'drizzle-orm'
-
 import { db } from '#/db/client'
 import { authProvider } from '#/db/schema'
+import { getSiteSettings } from '#/server/settings'
 
-export interface PublicAuthProvider {
-  providerId: string
-  displayName: string
+export type SocialProviderId = 'google' | 'github' | 'oidc'
+
+export interface PublicLoginConfig {
+  emailPassword: { enabled: boolean; verificationRequired: boolean }
+  social: { providerId: SocialProviderId; displayName: string }[]
+  passkey: { enabled: boolean }
 }
+
+const SOCIAL_IDS = new Set<string>(['google', 'github', 'oidc'])
 
 const CACHE_TTL = 60_000
 
-let cache: { value: PublicAuthProvider[]; at: number } | null = null
-let inflight: Promise<PublicAuthProvider[]> | null = null
+let cache: { value: PublicLoginConfig; at: number } | null = null
+let inflight: Promise<PublicLoginConfig> | null = null
 
-/** 登录页展示用的第三方登录列表；管理员保存配置后主动失效 */
-export async function listPublicAuthProviders(): Promise<PublicAuthProvider[]> {
+/** 登录页展示用的登录方式；管理员保存配置后主动失效 */
+export async function getPublicLoginConfig(): Promise<PublicLoginConfig> {
   if (cache && Date.now() - cache.at < CACHE_TTL) return cache.value
   if (inflight) return inflight
 
   const task = (async () => {
-    const rows = await db
-      .select({
-        providerId: authProvider.providerId,
-        displayName: authProvider.displayName,
-      })
-      .from(authProvider)
-      .where(eq(authProvider.enabled, true))
-    cache = { value: rows, at: Date.now() }
-    return rows
+    // 取全部行：停用的邮箱密码方式也要能读到，避免误判为默认开启
+    const [rows, settings] = await Promise.all([
+      db.select().from(authProvider),
+      getSiteSettings(),
+    ])
+    const methods = new Map(rows.map((row) => [row.providerId, row]))
+    const emailRow = methods.get('email')
+
+    const value: PublicLoginConfig = {
+      emailPassword: {
+        // 缺行表示管理员删除了邮箱密码方式
+        enabled: emailRow ? emailRow.enabled : false,
+        verificationRequired: settings.emailVerificationRequired,
+      },
+      social: rows
+        .filter((row) => row.enabled && SOCIAL_IDS.has(row.providerId))
+        .map((row) => ({
+          providerId: row.providerId as SocialProviderId,
+          displayName: row.displayName,
+        })),
+      passkey: { enabled: Boolean(methods.get('passkey')?.enabled) },
+    }
+    cache = { value, at: Date.now() }
+    return value
   })()
 
   inflight = task
@@ -40,6 +59,6 @@ export async function listPublicAuthProviders(): Promise<PublicAuthProvider[]> {
   }
 }
 
-export function invalidatePublicAuthProviders() {
+export function invalidatePublicLoginConfig() {
   cache = null
 }

@@ -9,6 +9,7 @@ import {
   RiArrowLeftLine,
   RiGlobalLine,
   RiKey2Line,
+  RiLockPasswordLine,
   RiMailLine,
   RiMenuLine,
   RiSettings4Line,
@@ -34,8 +35,8 @@ const NAV = [
   { to: '/admin/providers', label: '服务商', icon: RiKey2Line, exact: false },
   {
     to: '/admin/auth',
-    label: '第三方登录',
-    icon: RiShieldKeyholeLine,
+    label: '登录',
+    icon: RiLockPasswordLine,
     exact: false,
   },
   {
