@@ -4,12 +4,14 @@
 
 同一套 schema 支持两种运行形态：
 
-| 形态 | `DATABASE_URL` | 说明 |
-| --- | --- | --- |
-| 本地 SQLite | `file:./data/asms2.db` | 开发与单机部署；启动时自动创建目录 |
-| Turso | `libsql://<db>-<org>.turso.io` | 生产/多实例；需 `DATABASE_AUTH_TOKEN` |
+| 形态        | `DATABASE_URL`                 | 说明                                  |
+| ----------- | ------------------------------ | ------------------------------------- |
+| 本地 SQLite | `file:./data/asms2.db`         | 开发与单机部署；启动时自动创建目录    |
+| Turso       | `libsql://<db>-<org>.turso.io` | 生产/多实例；需 `DATABASE_AUTH_TOKEN` |
 
-驱动是 `@libsql/client` + `drizzle-orm/libsql`，不是 `better-sqlite3`。`drizzle.config.ts` 会根据 URL 前缀自动切换 `sqlite` / `turso` 方言，迁移文件两边共用。
+驱动是 `@libsql/client` + `drizzle-orm/libsql`。`drizzle.config.ts` 会根据 URL 前缀自动切换 `sqlite` / `turso` 方言，迁移文件两边共用。
+
+本地 `file:` 模式启动时会启用 WAL，并为每个池连接设置 5 秒 busy timeout，避免 Webhook、定时清理与面板请求并发时直接抛 `SQLITE_BUSY`；Turso 远程模式忽略这些本地 pragma。
 
 ## 2. 迁移流程
 
@@ -59,23 +61,28 @@ WHERE kind = 'temp' AND last_received_at IS NOT NULL
 
 ## 4. 字段约定
 
-| 项 | 约定 |
-| --- | --- |
-| 时间 | `integer(..., { mode: 'timestamp' })`，存 Unix **秒**；API 输出毫秒 |
-| 主键 | `text`，nanoid（20 位） |
-| 布尔 | `integer({ mode: 'boolean' })` |
-| 枚举 | `text` + TS 联合类型（SQLite 无原生 enum） |
-| JSON | `text`，字段名以 `Json` 结尾，读取时 `JSON.parse` |
-| 软删 | `status='deleted'` + `deletedAt`；地址改写为 `原地址#id` 释放唯一索引 |
+| 项   | 约定                                                                  |
+| ---- | --------------------------------------------------------------------- |
+| 时间 | `integer(..., { mode: 'timestamp' })`，存 Unix **秒**；API 输出毫秒   |
+| 主键 | `text`，nanoid（20 位）                                               |
+| 布尔 | `integer({ mode: 'boolean' })`                                        |
+| 枚举 | `text` + TS 联合类型（SQLite 无原生 enum）                            |
+| JSON | `text`，字段名以 `Json` 结尾，读取时 `JSON.parse`                     |
+| 软删 | `status='deleted'` + `deletedAt`；地址改写为 `原地址#id` 释放唯一索引；邮件立即隐藏，保留期与冷却期后由 sweep 分块硬删 |
 
 ## 5. 关键索引
 
 - `mailbox(address)`、`(domain_id, local_part)`：地址唯一与反查。
 - `mailbox(kind, status, expires_at)`：清理任务扫描。
-- `message(mailbox_id, folder, received_at)`、`(user_id, folder, received_at)`：列表。
+- `mailbox(user_id, kind, created_at)`：临时邮箱创建限流。
+- `message(mailbox_id, folder, received_at, id)`、`(user_id, folder, received_at, id)`：列表分页与游标排序。
+- `message(folder, received_at)`：回收站等按文件夹清理。
 - `message(provider_config_id, provider_message_id)` UNIQUE：收发幂等。
-- `daily_usage(user_id, usage_date)` UNIQUE：配额 UPSERT。
+- `apikey(key)`：API Key 校验，避免全表扫描。
+- `session(expires_at)`、`verification(expires_at)`：过期会话与验证记录清理。
+- `daily_usage(user_id, usage_date)` UNIQUE、`(usage_date)`：配额 UPSERT 与历史清理。
 - `webhook_event(endpoint_id, provider_event_id)` UNIQUE：重复事件去重。
+- `unrouted_message(provider_message_id)`：墓碑查重。
 
 新增查询前先看现有索引；列表类查询避免 `SELECT *` 带出 `message_body`。
 

@@ -17,25 +17,62 @@ export const Route = createFileRoute('/admin/site')({
   component: AdminSite,
 })
 
-const NUMBER_FIELDS: { key: keyof SiteSettings; label: string; hint?: string }[] = [
-  { key: 'defaultMailboxLimit', label: '默认长期邮箱上限', hint: '每个用户可创建的长期邮箱数' },
-  { key: 'defaultDailySendLimit', label: '默认每日发件上限', hint: '每天 0 点（站点时区）重置' },
+const NUMBER_FIELDS: {
+  key: keyof SiteSettings
+  label: string
+  hint?: string
+}[] = [
+  {
+    key: 'defaultMailboxLimit',
+    label: '默认长期邮箱上限',
+    hint: '每个用户可创建的长期邮箱数',
+  },
+  {
+    key: 'defaultDailySendLimit',
+    label: '默认每日发件上限',
+    hint: '每天 0 点（站点时区）重置',
+  },
   { key: 'permanentPrefixMin', label: '长期邮箱前缀最短长度' },
   { key: 'tempPrefixMin', label: '临时邮箱前缀最短长度' },
   { key: 'prefixMax', label: '前缀最长长度' },
-  { key: 'tempTtlMinutes', label: '临时邮箱考察期（分钟）', hint: '考察期内收到邮件即永久保留，否则失效' },
-  { key: 'tempGraceMinutes', label: '失效后保留（分钟）', hint: '仅对未激活即失效的临时邮箱生效' },
+  {
+    key: 'tempTtlMinutes',
+    label: '临时邮箱考察期（分钟）',
+    hint: '考察期内收到邮件即永久保留，否则失效',
+  },
+  {
+    key: 'tempGraceMinutes',
+    label: '失效后保留（分钟）',
+    hint: '仅对未激活即失效的临时邮箱生效',
+  },
   { key: 'tempCooldownHours', label: '临时地址冷却（小时）' },
   { key: 'permanentCooldownDays', label: '长期地址冷却（天）' },
   { key: 'trashRetentionDays', label: '回收站保留（天）' },
   { key: 'orphanRetentionDays', label: '孤儿邮件保留（天）' },
+  {
+    key: 'deletedMailboxRetentionDays',
+    label: '已删除邮箱保留（天）',
+    hint: '超期后清空邮件并删除邮箱墓碑，实际清理还会等待地址冷却期结束',
+  },
 ]
 
-const BOOLEAN_FIELDS: { key: keyof SiteSettings; label: string; hint?: string }[] = [
-  { key: 'registrationEnabled', label: '开放注册', hint: '关闭后新账号无法创建' },
+const BOOLEAN_FIELDS: {
+  key: keyof SiteSettings
+  label: string
+  hint?: string
+}[] = [
+  {
+    key: 'registrationEnabled',
+    label: '开放注册',
+    hint: '关闭后新账号无法创建',
+  },
   { key: 'allowTempSend', label: '允许临时邮箱发信', hint: '默认只收不发' },
   { key: 'allowUserDomainChoice', label: '允许用户选择域名' },
-  { key: 'adminCanReadMail', label: '允许管理员查看邮件正文', hint: '每次查看都会写审计日志' },
+  {
+    key: 'adminCanReadMail',
+    label: '允许管理员查看邮件正文',
+    hint: '每次查看都会写审计日志',
+  },
 ]
 
 function AdminSite() {
@@ -89,6 +126,7 @@ function AdminSite() {
         adminCanReadMail: form.adminCanReadMail,
         trashRetentionDays: form.trashRetentionDays,
         orphanRetentionDays: form.orphanRetentionDays,
+        deletedMailboxRetentionDays: form.deletedMailboxRetentionDays,
         timezone: form.timezone,
       },
     })
@@ -160,7 +198,10 @@ function AdminSite() {
         </div>
       </PageSection>
 
-      <PageSection title="配额与有效期" description="修改后对新创建生效，已存在的邮箱不追溯">
+      <PageSection
+        title="配额与有效期"
+        description="修改后对新创建生效，已存在的邮箱不追溯"
+      >
         <div className="grid gap-4 md:grid-cols-3">
           {NUMBER_FIELDS.map((field) => (
             <Input
@@ -169,9 +210,7 @@ function AdminSite() {
               hint={field.hint}
               type="number"
               value={String(form[field.key] ?? 0)}
-              onChange={(value) =>
-                set(field.key, Number(value || 0) as never)
-              }
+              onChange={(value) => set(field.key, Number(value || 0) as never)}
             />
           ))}
           <Input
@@ -191,7 +230,9 @@ function AdminSite() {
               className="flex items-center justify-between gap-4 py-3"
             >
               <div>
-                <p className="text-body-medium text-text-primary">{field.label}</p>
+                <p className="text-body-medium text-text-primary">
+                  {field.label}
+                </p>
                 {field.hint ? (
                   <p className="text-caption-1-regular text-text-tertiary">
                     {field.hint}

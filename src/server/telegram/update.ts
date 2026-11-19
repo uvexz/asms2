@@ -2,7 +2,7 @@ import { db } from '#/db/client'
 import { telegramUpdate } from '#/db/schema'
 import { AppError } from '#/server/errors'
 import { randomNameLocalPart } from '#/lib/name-prefix'
-import { escapeHtml, htmlToText } from '#/server/mail/content'
+import { escapeHtml, sanitizedHtmlToText } from '#/server/mail/content'
 import {
   createMailbox,
   getMailboxOrThrow,
@@ -524,7 +524,8 @@ async function showMessage(
   await markRead(userId, targetMessageId, true).catch(() => undefined)
 
   const settings = await getSiteSettings()
-  const body = detail.text ?? (detail.html ? htmlToText(detail.html) : null)
+  const body =
+    detail.text ?? (detail.html ? sanitizedHtmlToText(detail.html) : null)
   const text = renderMessageDetail({
     mailboxAddress: detail.mailboxAddress,
     subject: detail.subject,

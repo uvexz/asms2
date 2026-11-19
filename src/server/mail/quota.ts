@@ -6,14 +6,25 @@ import { dailyUsage } from '#/db/schema'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
 
+const dateFormatters = new Map<string, Intl.DateTimeFormat>()
+
+function dateFormatterFor(timezone: string) {
+  let formatter = dateFormatters.get(timezone)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+    dateFormatters.set(timezone, formatter)
+  }
+  return formatter
+}
+
 /** 按站点时区取 `YYYY-MM-DD`，作为每日配额的计数键 */
 export function usageDateFor(timezone: string, now = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now)
+  return dateFormatterFor(timezone).format(now)
 }
 
 /**
@@ -46,23 +57,8 @@ export async function refundSendQuota(userId: string, usageDate: string) {
       updatedAt: new Date(),
     })
     .where(
-      and(
-        eq(dailyUsage.userId, userId),
-        eq(dailyUsage.usageDate, usageDate),
-      ),
+      and(eq(dailyUsage.userId, userId), eq(dailyUsage.usageDate, usageDate)),
     )
-}
-
-export async function incrementReceivedCount(
-  userId: string,
-  usageDate: string,
-) {
-  await db.run(sql`
-    insert into daily_usage (id, user_id, usage_date, sent_count, received_count, updated_at)
-    values (${idPart()}, ${userId}, ${usageDate}, 0, 1, unixepoch())
-    on conflict (user_id, usage_date)
-    do update set received_count = received_count + 1, updated_at = unixepoch()
-  `)
 }
 
 export async function getSendUsage(
@@ -75,10 +71,7 @@ export async function getSendUsage(
       .select()
       .from(dailyUsage)
       .where(
-        and(
-          eq(dailyUsage.userId, userId),
-          eq(dailyUsage.usageDate, usageDate),
-        ),
+        and(eq(dailyUsage.userId, userId), eq(dailyUsage.usageDate, usageDate)),
       )
       .limit(1)
   )[0]

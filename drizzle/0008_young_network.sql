@@ -1,0 +1,1 @@
+ALTER TABLE `site_settings` ADD `deleted_mailbox_retention_days` integer DEFAULT 30 NOT NULL;

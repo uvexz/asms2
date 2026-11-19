@@ -111,18 +111,19 @@ async function handleEvent(params: {
   const eventRowId = claimedId
 
   async function markProcessed() {
-    await db
-      .update(webhookEvent)
-      .set({ status: 'processed', processedAt: new Date() })
-      .where(eq(webhookEvent.id, eventRowId))
-
-    await db
-      .update(webhookEndpoint)
-      .set({
-        lastEventAt: new Date(),
-        eventCount: sql`${webhookEndpoint.eventCount} + 1`,
-      })
-      .where(eq(webhookEndpoint.id, endpoint.id))
+    await db.batch([
+      db
+        .update(webhookEvent)
+        .set({ status: 'processed', processedAt: new Date() })
+        .where(eq(webhookEvent.id, eventRowId)),
+      db
+        .update(webhookEndpoint)
+        .set({
+          lastEventAt: new Date(),
+          eventCount: sql`${webhookEndpoint.eventCount} + 1`,
+        })
+        .where(eq(webhookEndpoint.id, endpoint.id)),
+    ])
   }
 
   try {
@@ -171,25 +172,31 @@ async function handleEvent(params: {
 }
 
 export async function processWebhook(input: ProcessWebhookInput) {
-  const endpointRows = await db
-    .select()
-    .from(webhookEndpoint)
-    .where(eq(webhookEndpoint.id, input.endpointId))
-    .limit(1)
-  const endpoint = endpointRows[0] as EndpointRow | undefined
+  const row = (
+    await db
+      .select({
+        endpoint: webhookEndpoint,
+        config: providerConfig,
+      })
+      .from(webhookEndpoint)
+      .innerJoin(
+        providerConfig,
+        eq(providerConfig.id, webhookEndpoint.providerConfigId),
+      )
+      .where(eq(webhookEndpoint.id, input.endpointId))
+      .limit(1)
+  )[0] as
+    | {
+        endpoint: typeof webhookEndpoint.$inferSelect
+        config: typeof providerConfig.$inferSelect
+      }
+    | undefined
 
-  if (!endpoint || !endpoint.enabled) {
+  if (!row || !row.endpoint.enabled) {
     throw new AppError('not_found', 'Webhook 端点不存在', 404)
   }
 
-  const configRows = await db
-    .select()
-    .from(providerConfig)
-    .where(eq(providerConfig.id, endpoint.providerConfigId))
-    .limit(1)
-  const config = configRows[0] as ConfigRow | undefined
-
-  if (!config) throw new AppError('not_found', '服务商配置不存在', 404)
+  const { endpoint, config } = row
 
   // URL 里的 kind 必须与端点所属服务商一致，避免把 A 家的推送配成 B 家的地址
   if (input.providerKind && input.providerKind !== config.kind) {

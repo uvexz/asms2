@@ -403,6 +403,7 @@ export function MailShell({ children }: { children: ReactNode }) {
   const [q, setQ] = useState('')
   const search = mailRoute.useSearch()
   const navigate = useNavigate({ from: '/mail' })
+  const queryClient = useQueryClient()
   const mailboxes = useQuery(mailboxesQuery)
   const { site } = rootApi.useLoaderData()
 
@@ -481,6 +482,10 @@ export function MailShell({ children }: { children: ReactNode }) {
             aria-label="刷新"
             onClick={() => {
               void mailboxes.refetch()
+              void queryClient.invalidateQueries({ queryKey: ['messages'] })
+              void queryClient.invalidateQueries({
+                queryKey: ['messages-latest'],
+              })
               void navigate({ search: (prev) => ({ ...prev }), replace: true })
             }}
           />

@@ -51,7 +51,10 @@ export const session = sqliteTable(
       .references(() => user.id, { onDelete: 'cascade' }),
     impersonatedBy: text('impersonated_by'),
   },
-  (table) => [index('session_user_id_idx').on(table.userId)],
+  (table) => [
+    index('session_user_id_idx').on(table.userId),
+    index('session_expires_idx').on(table.expiresAt),
+  ],
 )
 
 export const account = sqliteTable(
@@ -98,7 +101,10 @@ export const verification = sqliteTable(
       .default(sql`(unixepoch())`)
       .notNull(),
   },
-  (table) => [index('verification_identifier_idx').on(table.identifier)],
+  (table) => [
+    index('verification_identifier_idx').on(table.identifier),
+    index('verification_expires_idx').on(table.expiresAt),
+  ],
 )
 
 /** better-auth `apiKey` 插件用表（@better-auth/api-key） */
@@ -118,9 +124,9 @@ export const apikey = sqliteTable(
     refillAmount: integer('refill_amount'),
     lastRefillAt: integer('last_refill_at', { mode: 'timestamp' }),
     enabled: integer('enabled', { mode: 'boolean' }).default(true),
-    rateLimitEnabled: integer('rate_limit_enabled', { mode: 'boolean' }).default(
-      true,
-    ),
+    rateLimitEnabled: integer('rate_limit_enabled', {
+      mode: 'boolean',
+    }).default(true),
     rateLimitTimeWindow: integer('rate_limit_time_window'),
     rateLimitMax: integer('rate_limit_max'),
     requestCount: integer('request_count').default(0),
@@ -136,5 +142,8 @@ export const apikey = sqliteTable(
     permissions: text('permissions'),
     metadata: text('metadata'),
   },
-  (table) => [index('apikey_reference_id_idx').on(table.referenceId)],
+  (table) => [
+    index('apikey_reference_id_idx').on(table.referenceId),
+    index('apikey_key_idx').on(table.key),
+  ],
 )

@@ -1,9 +1,10 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { customAlphabet } from 'nanoid'
 
 import { db } from '#/db/client'
 import {
   attachment,
+  dailyUsage,
   mailbox,
   message,
   messageBody,
@@ -24,8 +25,8 @@ import {
 } from '#/lib/email-address'
 
 import { getReservedWords } from './address'
-import { htmlToText, makeSnippet, sanitizeEmailHtml } from './content'
-import { incrementReceivedCount, usageDateFor } from './quota'
+import { makeSnippet, sanitizeEmailHtml, sanitizedHtmlToText } from './content'
+import { usageDateFor } from './quota'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
 
@@ -191,8 +192,9 @@ export async function ingestInbound(params: {
     (await provider.getInbound(data.providerMessageId, runtime))
   const headers = content.headers ?? {}
   const rawHtml = content.html ?? ''
-  const plain = content.text ?? (rawHtml ? htmlToText(rawHtml) : '')
   const sanitized = rawHtml ? sanitizeEmailHtml(rawHtml) : ''
+  const plain =
+    content.text ?? (sanitized ? sanitizedHtmlToText(sanitized) : '')
   const subject = data.subject ?? (headers['subject'] || '(无主题)')
   const from = parseAddress(data.from)
   const receivedAt = data.receivedAt ? new Date(data.receivedAt) : new Date()
@@ -204,6 +206,7 @@ export async function ingestInbound(params: {
 
   const messageId = idPart()
   const now = new Date()
+  const usageDate = usageDateFor(settings.timezone, receivedAt)
 
   const statements = [
     db.insert(message).values({
@@ -253,6 +256,23 @@ export async function ingestInbound(params: {
         updatedAt: now,
       })
       .where(eq(mailbox.id, target.id)),
+    db
+      .insert(dailyUsage)
+      .values({
+        id: idPart(),
+        userId: target.userId,
+        usageDate,
+        sentCount: 0,
+        receivedCount: 1,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [dailyUsage.userId, dailyUsage.usageDate],
+        set: {
+          receivedCount: sql`${dailyUsage.receivedCount} + 1`,
+          updatedAt: now,
+        },
+      }),
   ]
 
   if (attachmentMetas.length > 0) {
@@ -280,11 +300,6 @@ export async function ingestInbound(params: {
     }
     throw error
   }
-
-  await incrementReceivedCount(
-    target.userId,
-    usageDateFor(settings.timezone, receivedAt),
-  ).catch(() => undefined)
 
   // Telegram 推送是附加能力：不 await，避免 Telegram 抖动拖慢 Resend 的 webhook 响应；
   // Node 常驻进程会继续把推送跑完，失败只记日志。

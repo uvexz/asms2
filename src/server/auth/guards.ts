@@ -23,6 +23,15 @@ export async function getSession() {
   return auth.api.getSession({ headers: getRequestHeaders() })
 }
 
+/** 跳过 cookieCache，用于管理员权限等不能接受缓存延迟的校验 */
+export async function getFreshSession() {
+  const auth = await getAuth()
+  return auth.api.getSession({
+    headers: getRequestHeaders(),
+    query: { disableCookieCache: true },
+  })
+}
+
 export async function requireUser(): Promise<SessionUser> {
   const session = await getSession().catch(() => null)
   if (!session?.user) {
@@ -32,7 +41,11 @@ export async function requireUser(): Promise<SessionUser> {
 }
 
 export async function requireAdmin(): Promise<SessionUser> {
-  const user = await requireUser()
+  const session = await getFreshSession().catch(() => null)
+  if (!session?.user) {
+    throw new AppError('unauthorized', '请先登录', 401)
+  }
+  const user = session.user as unknown as SessionUser
   if (user.role !== 'admin') {
     throw new AppError('forbidden', '需要管理员权限', 403)
   }

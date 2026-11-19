@@ -11,7 +11,11 @@ const config = defineConfig({
   resolve: { tsconfigPaths: true },
   plugins: [
     devtools(),
-    nitro({ rollupConfig: { external: [/^@sentry\//] } }),
+    nitro({
+      compressPublicAssets: { gzip: true, brotli: true },
+      plugins: ['./src/server/plugins/request-timing.ts'],
+      rollupConfig: { external: [/^@sentry\//] },
+    }),
     tailwindcss(),
     tanstackStart(),
     viteReact(),

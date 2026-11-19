@@ -11,6 +11,7 @@ import {
   mailbox,
   message,
   providerConfig,
+  session,
   siteSettings,
   unroutedMessage,
   user,
@@ -19,6 +20,7 @@ import {
 } from '#/db/schema'
 import { clientIp, requireAdmin, userAgent } from '#/server/auth/guards'
 import { invalidateAuthCache } from '#/server/auth'
+import { invalidatePublicAuthProviders } from '#/server/auth/public-providers'
 import { encryptSecret, last4 } from '#/server/crypto/secret-box'
 import { AppError, attempt } from '#/server/errors'
 import { getProviderById } from '#/server/mail/provider-config'
@@ -117,6 +119,7 @@ const settingsPatchSchema = z.object({
   adminCanReadMail: z.boolean().optional(),
   trashRetentionDays: z.number().int().min(1).max(365).optional(),
   orphanRetentionDays: z.number().int().min(1).max(365).optional(),
+  deletedMailboxRetentionDays: z.number().int().min(0).max(3650).optional(),
   timezone: z.string().max(60).optional(),
 })
 
@@ -733,6 +736,7 @@ export const adminUpsertAuthProviderFn = createServerFn({ method: 'POST' })
 
       await bumpAuthConfigVersion()
       invalidateAuthCache()
+      invalidatePublicAuthProviders()
       await audit(
         actor.id,
         'auth_provider.upsert',
@@ -802,11 +806,30 @@ export const adminUpdateUserFn = createServerFn({ method: 'POST' })
       if (data.id === actor.id && data.role === 'user') {
         throw new AppError('validation_failed', '不能降级自己')
       }
+
+      const current = (
+        await db
+          .select({ role: user.role, banned: user.banned })
+          .from(user)
+          .where(eq(user.id, data.id))
+          .limit(1)
+      )[0] as { role: string | null; banned: boolean | null } | undefined
+      if (!current) throw new AppError('not_found', '用户不存在', 404)
+
       const { id, ...patch } = data
       await db
         .update(user)
         .set({ ...patch, updatedAt: new Date() })
         .where(eq(user.id, id))
+
+      // 封禁或管理员降权时撤销已有会话；cookieCache 很短，剩余窗口有限
+      if (
+        (patch.banned === true && !current.banned) ||
+        (patch.role === 'user' && current.role === 'admin')
+      ) {
+        await db.delete(session).where(eq(session.userId, id))
+      }
+
       await audit(actor.id, 'user.update', 'user', id, patch)
       return { id }
     }),
@@ -844,15 +867,18 @@ export const adminListWebhookEventsFn = createServerFn({
   attempt(async () => {
     await requireAdmin()
     const rows = await db
-      .select()
+      .select({
+        id: webhookEvent.id,
+        type: webhookEvent.type,
+        status: webhookEvent.status,
+        error: webhookEvent.error,
+        receivedAt: webhookEvent.receivedAt,
+      })
       .from(webhookEvent)
       .orderBy(desc(webhookEvent.receivedAt))
       .limit(100)
     return rows.map((row) => ({
-      id: row.id,
-      type: row.type,
-      status: row.status,
-      error: row.error,
+      ...row,
       receivedAt: row.receivedAt.getTime(),
     }))
   }),
@@ -863,15 +889,18 @@ export const adminListUnroutedFn = createServerFn({ method: 'GET' }).handler(
     attempt(async () => {
       await requireAdmin()
       const rows = await db
-        .select()
+        .select({
+          id: unroutedMessage.id,
+          from: unroutedMessage.fromAddress,
+          subject: unroutedMessage.subject,
+          reason: unroutedMessage.reason,
+          createdAt: unroutedMessage.createdAt,
+        })
         .from(unroutedMessage)
         .orderBy(desc(unroutedMessage.createdAt))
         .limit(50)
       return rows.map((row) => ({
-        id: row.id,
-        from: row.fromAddress,
-        subject: row.subject,
-        reason: row.reason,
+        ...row,
         createdAt: row.createdAt.getTime(),
       }))
     }),

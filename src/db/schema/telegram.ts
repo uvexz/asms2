@@ -80,7 +80,10 @@ export const telegramBindCode = sqliteTable(
       .default(sql`(unixepoch())`)
       .notNull(),
   },
-  (table) => [index('telegram_bind_code_user_idx').on(table.userId)],
+  (table) => [
+    index('telegram_bind_code_user_idx').on(table.userId),
+    index('telegram_bind_code_created_idx').on(table.createdAt),
+  ],
 )
 
 /** update_id 去重：Telegram 在超时后会重推，和 webhook_event 是同一套思路 */

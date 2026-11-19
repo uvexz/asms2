@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -18,15 +18,22 @@ import { Chip } from '@/components/base/badges/chip'
 import { Divider } from '@/components/base/divider/divider'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { toast } from '@/components/base/toast/toast'
-import { formatBytes, formatDateTime, unwrap } from '#/lib/api'
+import {
+  formatBytes,
+  formatDateTime,
+  patchMessageCaches,
+  removeMessageFromCaches,
+  unwrap,
+} from '#/lib/api'
 import { getMessageFn, updateMessageFn } from '#/server/fns/mail'
 import type { MailboxView } from '#/server/mail/mailbox'
 
 import { useCompose } from './compose-context'
 
-
 function buildSrcDoc(html: string, allowRemoteImages: boolean) {
-  const imgSrc = allowRemoteImages ? "'self' https: http: data: cid:" : 'data: cid:'
+  const imgSrc = allowRemoteImages
+    ? "'self' https: http: data: cid:"
+    : 'data: cid:'
   return `<!doctype html><html><head><meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${imgSrc}; style-src 'unsafe-inline'; font-src data:;" />
 <base target="_blank" />
@@ -49,10 +56,16 @@ export function MessageReader({
   const queryClient = useQueryClient()
   const { openCompose } = useCompose()
   const [allowImages, setAllowImages] = useState(false)
+  const markUnreadId = useRef<string | null>(null)
+
+  useEffect(() => {
+    markUnreadId.current = null
+  }, [messageId])
 
   const query = useQuery({
     queryKey: ['message', messageId],
-    queryFn: async () => unwrap(await getMessageFn({ data: { id: messageId } })),
+    queryFn: async () =>
+      unwrap(await getMessageFn({ data: { id: messageId } })),
     staleTime: 30_000,
   })
 
@@ -60,11 +73,12 @@ export function MessageReader({
 
   useEffect(() => {
     if (!message || message.isRead) return
+    if (markUnreadId.current === message.id) return
     void updateMessageFn({ data: { id: message.id, isRead: true } }).then(
       async (result) => {
         if (result.ok) {
+          patchMessageCaches(queryClient, message.id, { isRead: true })
           await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
-          await queryClient.invalidateQueries({ queryKey: ['messages'] })
         }
       },
     )
@@ -107,14 +121,25 @@ export function MessageReader({
       toast.error(result.error.message)
       return
     }
-    await queryClient.invalidateQueries({ queryKey: ['messages'] })
-    await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
+
     if (action === 'trash') {
+      removeMessageFromCaches(queryClient, message.id)
+      await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
       toast.success('已移入回收站')
       void navigate({ to: '/mail', search: (prev) => ({ ...prev }) })
-    } else {
-      await queryClient.invalidateQueries({ queryKey: ['message', message.id] })
+      return
     }
+
+    if (action === 'unread') {
+      markUnreadId.current = message.id
+      patchMessageCaches(queryClient, message.id, { isRead: false })
+      await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
+      return
+    }
+
+    patchMessageCaches(queryClient, message.id, {
+      isStarred: !message.isStarred,
+    })
   }
 
   return (
@@ -125,7 +150,9 @@ export function MessageReader({
           size="small"
           icon={RiArrowLeftLine}
           aria-label="返回列表"
-          onClick={() => void navigate({ to: '/mail', search: (prev) => ({ ...prev }) })}
+          onClick={() =>
+            void navigate({ to: '/mail', search: (prev) => ({ ...prev }) })
+          }
         />
         <IconButton
           size="small"
@@ -184,11 +211,11 @@ export function MessageReader({
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <Chip color="neutral">{message.mailboxAddress}</Chip>
-              <Chip color="blue">{message.direction === 'inbound' ? '收件' : '发件'}</Chip>
+              <Chip color="blue">
+                {message.direction === 'inbound' ? '收件' : '发件'}
+              </Chip>
               {message.attachments.length > 0 ? (
-                <Chip color="gray">
-                  {message.attachments.length} 个附件
-                </Chip>
+                <Chip color="gray">{message.attachments.length} 个附件</Chip>
               ) : null}
             </div>
           </div>

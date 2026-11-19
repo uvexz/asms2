@@ -12,10 +12,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '#/db/client'
 import * as schema from '#/db/schema'
 import { decryptSecret } from '#/server/crypto/secret-box'
-import {
-  getAuthConfigVersion,
-  getSiteSettings,
-} from '#/server/settings'
+import { getAuthConfigVersion, getSiteSettings } from '#/server/settings'
 
 export type AuthInstance = ReturnType<typeof betterAuth>
 
@@ -54,8 +51,10 @@ async function promoteBootstrapAdmin(userId?: string, email?: string) {
 
 async function buildAuth(): Promise<AuthInstance> {
   const providers = await loadEnabledProviders()
-  const socialProviders: Record<string, { clientId: string; clientSecret: string }> =
-    {}
+  const socialProviders: Record<
+    string,
+    { clientId: string; clientSecret: string }
+  > = {}
   const oauthConfigs: Record<string, unknown>[] = []
 
   for (const provider of providers) {
@@ -86,10 +85,7 @@ async function buildAuth(): Promise<AuthInstance> {
     }
   }
 
-  const plugins: unknown[] = [
-    admin(),
-    apiKey({ enableMetadata: true }),
-  ]
+  const plugins: unknown[] = [admin(), apiKey({ enableMetadata: true })]
   if (oauthConfigs.length > 0) {
     plugins.push(genericOAuth({ config: oauthConfigs as never }))
   }
@@ -113,7 +109,11 @@ async function buildAuth(): Promise<AuthInstance> {
     account: { encryptOAuthTokens: true },
     user: {
       additionalFields: {
-        mailboxLimit: { type: 'number' as const, required: false, input: false },
+        mailboxLimit: {
+          type: 'number' as const,
+          required: false,
+          input: false,
+        },
         sendLimit: { type: 'number' as const, required: false, input: false },
       },
     },
@@ -121,7 +121,8 @@ async function buildAuth(): Promise<AuthInstance> {
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
-      cookieCache: { enabled: true, maxAge: 300 },
+      // 缓存仍能挡掉绝大多数会话查询，同时把封禁/降权的最坏延迟压到 1 分钟
+      cookieCache: { enabled: true, maxAge: 60 },
     },
     databaseHooks: {
       user: {
@@ -153,12 +154,11 @@ async function buildAuth(): Promise<AuthInstance> {
 
 let cache: { version: string; instance: AuthInstance } | null = null
 let lastCheckedAt = 0
+let resolving: Promise<AuthInstance> | null = null
 const VERSION_TTL = 30_000
 
-export async function getAuth(): Promise<AuthInstance> {
+async function resolveAuth(): Promise<AuthInstance> {
   const now = Date.now()
-  if (cache && now - lastCheckedAt < VERSION_TTL) return cache.instance
-
   const version = await getAuthConfigVersion().catch(() => '0')
   lastCheckedAt = now
   if (cache && cache.version === version) return cache.instance
@@ -169,7 +169,22 @@ export async function getAuth(): Promise<AuthInstance> {
   return instance
 }
 
+export async function getAuth(): Promise<AuthInstance> {
+  const now = Date.now()
+  if (cache && now - lastCheckedAt < VERSION_TTL) return cache.instance
+  if (resolving) return resolving
+
+  const task = resolveAuth()
+  resolving = task
+  try {
+    return await task
+  } finally {
+    if (resolving === task) resolving = null
+  }
+}
+
 export function invalidateAuthCache() {
   lastCheckedAt = 0
   cache = null
+  resolving = null
 }

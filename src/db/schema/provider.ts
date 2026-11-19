@@ -1,11 +1,5 @@
 import { sql } from 'drizzle-orm'
-import {
-  index,
-  integer,
-  sqliteTable,
-  text,
-  uniqueIndex,
-} from 'drizzle-orm/sqlite-core'
+import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 import { user } from './auth'
 
@@ -140,6 +134,5 @@ export const webhookEndpoint = sqliteTable(
   },
   (table) => [
     index('webhook_endpoint_provider_idx').on(table.providerConfigId),
-    uniqueIndex('webhook_endpoint_id_idx').on(table.id),
   ],
 )

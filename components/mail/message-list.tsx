@@ -1,13 +1,25 @@
-import { useInfiniteQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef } from 'react'
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import type { InfiniteData } from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
-import { RiAttachment2, RiInboxLine, RiStarFill, RiStarLine } from '@remixicon/react'
+import {
+  RiAttachment2,
+  RiInboxLine,
+  RiStarFill,
+  RiStarLine,
+} from '@remixicon/react'
 
 import { Button } from '@/components/base/buttons/button'
 import { Skeleton } from '@/components/base/skeleton/skeleton'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { toast } from '@/components/base/toast/toast'
 import { cx } from '@/utils/cx'
-import { formatTime, unwrap } from '#/lib/api'
+import { formatTime, patchMessageCaches, unwrap } from '#/lib/api'
+import type { MessagePage } from '#/lib/api'
 import { listMessagesFn, updateMessageFn } from '#/server/fns/mail'
 
 const mailRoute = getRouteApi('/mail')
@@ -15,43 +27,88 @@ const mailRoute = getRouteApi('/mail')
 export function MessageList({ selectedId }: { selectedId?: string }) {
   const search = mailRoute.useSearch()
   const navigate = useNavigate({ from: '/mail' })
+  const queryClient = useQueryClient()
+
+  const filters = useMemo(
+    () => ({
+      mailboxId: search.mailboxId,
+      folder: search.folder,
+      q: search.q,
+    }),
+    [search.mailboxId, search.folder, search.q],
+  )
+  const queryKey = useMemo(() => ['messages', filters] as const, [filters])
+  const latestKey = useMemo(
+    () => ['messages-latest', filters] as const,
+    [filters],
+  )
+
+  async function fetchPage(cursor?: string) {
+    return unwrap(await listMessagesFn({ data: { ...filters, cursor } }))
+  }
 
   const query = useInfiniteQuery({
-    queryKey: [
-      'messages',
-      {
-        mailboxId: search.mailboxId,
-        folder: search.folder,
-        q: search.q,
-      },
-    ],
-    queryFn: async ({ pageParam }) =>
-      unwrap(
-        await listMessagesFn({
-          data: {
-            mailboxId: search.mailboxId,
-            folder: search.folder,
-            q: search.q,
-            cursor: pageParam,
-          },
-        }),
-      ),
+    queryKey,
+    queryFn: ({ pageParam }) => fetchPage(pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+    staleTime: 5_000,
+  })
+
+  // 定时只刷新首页，避免无限列表把所有已加载分页都重新请求一遍
+  const latest = useQuery({
+    queryKey: latestKey,
+    queryFn: () => fetchPage(),
+    enabled: query.isSuccess,
+    staleTime: 5_000,
     refetchInterval: 20_000,
   })
 
-  const items = query.data?.pages.flatMap((page) => page.items) ?? []
+  const lastMergedAt = useRef(0)
+  useEffect(() => {
+    if (!latest.data || !latest.dataUpdatedAt || !query.data) return
+    if (latest.dataUpdatedAt <= lastMergedAt.current) return
+    lastMergedAt.current = latest.dataUpdatedAt
+
+    queryClient.setQueryData<InfiniteData<MessagePage>>(queryKey, (old) => {
+      if (!old || old.pages.length === 0) return old
+      return {
+        ...old,
+        pages: [
+          {
+            ...old.pages[0],
+            items: latest.data.items,
+            nextCursor: latest.data.nextCursor,
+          },
+          ...old.pages.slice(1),
+        ],
+      }
+    })
+  }, [latest.data, latest.dataUpdatedAt, query.data, queryClient, queryKey])
+
+  const items = useMemo(() => {
+    const seen = new Set<string>()
+    const result: MessagePage['items'] = []
+    for (const page of query.data?.pages ?? []) {
+      for (const item of page.items) {
+        if (seen.has(item.id)) continue
+        seen.add(item.id)
+        result.push(item)
+      }
+    }
+    return result
+  }, [query.data])
 
   async function toggleStar(id: string, starred: boolean) {
+    const next = !starred
+    patchMessageCaches(queryClient, id, { isStarred: next })
     const result = await updateMessageFn({
-      data: { id, isStarred: !starred },
+      data: { id, isStarred: next },
     })
     if (!result.ok) {
+      patchMessageCaches(queryClient, id, { isStarred: starred })
       toast.error(result.error.message)
-      return
     }
-    await query.refetch()
   }
 
   function open(id: string) {
@@ -86,8 +143,13 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
 
         {!query.isLoading && items.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-            <RiInboxLine className="size-10 text-foreground-icon-quaternary" aria-hidden />
-            <p className="text-body-medium text-text-secondary">这里还没有邮件</p>
+            <RiInboxLine
+              className="size-10 text-foreground-icon-quaternary"
+              aria-hidden
+            />
+            <p className="text-body-medium text-text-secondary">
+              这里还没有邮件
+            </p>
             <p className="text-caption-1-regular text-text-tertiary">
               {search.q
                 ? '换个关键词试试'
@@ -157,7 +219,10 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
                     className="shrink-0 rounded p-0.5 text-foreground-icon-tertiary hover:text-accent-600"
                   >
                     {item.isStarred ? (
-                      <RiStarFill className="size-4 text-accent-600" aria-hidden />
+                      <RiStarFill
+                        className="size-4 text-accent-600"
+                        aria-hidden
+                      />
                     ) : (
                       <RiStarLine className="size-4" aria-hidden />
                     )}

@@ -62,6 +62,7 @@ server {
 
 - 必须透传 `X-Forwarded-For/Proto`，否则限流、审计与 OAuth 回调地址会出错。
 - 若前面还有 CDN，确认 Webhook 路径没有被缓存或拦截（`/api/webhooks/*` 与 `/api/telegram/webhook` 应为 POST 直通）。
+- 构建会在 `public/assets` 下生成 gzip/brotli 预压缩文件，Nitro 会按 `Accept-Encoding` 直接返回；如需压缩 SSR HTML，可在 Nginx 额外开启 `gzip on; gzip_types text/html text/css application/javascript application/json;`。
 
 ## 4. 定时任务
 
@@ -69,7 +70,7 @@ server {
 * * * * * curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://mail.example.com/api/cron/sweep >/dev/null
 ```
 
-`sweep` 负责：临时邮箱到期落库、grace 后清空邮件、回收站过期清理、墓碑与 Webhook 事件回收、Telegram update 去重记录与过期绑定码回收。
+`sweep` 负责：临时邮箱到期落库、grace 后清空邮件、已删除邮箱在保留期与冷却期结束后的邮件/墓碑清理、回收站过期清理、墓碑与 Webhook 事件回收、Telegram update 去重记录与过期绑定码回收。
 
 - 未配置 `CRON_SECRET` 时接口返回 401。
 - 多实例部署时只需**一个**调度源，重复执行是幂等的但浪费。
@@ -96,7 +97,8 @@ turso db dump <db-name> > backup-$(date +%F).sql
 
 ## 6. 观测与排障
 
-- 日志为结构化输出，关键字段：`reqId`、`userId`、`route`、`provider`、`durationMs`、`code`。
+- 每个非静态请求输出一行 JSON：`type=request`、`reqId`、`method`、`path`、`status`、`durationMs`；4xx 用 `console.warn`，5xx 用 `console.error`。
+- 响应头会返回 `x-request-id`（客户端传入合法值时会复用）；`/assets/**`、Vite 模块请求及常见静态文件扩展名不记录，避免日志噪音。
 - 重点指标：收件入库延迟、Webhook 失败率、发件成功率、配额拒绝次数、临时邮箱存量。
 - `webhook_event` 表即死信队列：管理后台「日志 → Webhook」可看失败原因，修复后可重放。
 - `unrouted_message` 记录"收下了但没投递"的邮件，排查地址拼写/过期问题。

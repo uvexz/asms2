@@ -11,6 +11,24 @@ export type TelegramBotRow = typeof telegramBot.$inferSelect
 const CACHE_TTL = 10_000
 
 let cache: { value: TelegramBotRow | null; at: number } | null = null
+let inflight: Promise<TelegramBotRow | null> | null = null
+
+async function loadTelegramBotRow(): Promise<TelegramBotRow | null> {
+  try {
+    return (
+      (
+        await db
+          .select()
+          .from(telegramBot)
+          .where(eq(telegramBot.id, 'default'))
+          .limit(1)
+      )[0] ?? null
+    )
+  } catch {
+    // 迁移尚未执行时不阻塞启动
+    return null
+  }
+}
 
 /** 单行 Bot 配置；未初始化时返回 null（不做惰性建行，避免无意义的空记录） */
 export async function getTelegramBotRow(
@@ -19,24 +37,17 @@ export async function getTelegramBotRow(
   if (!force && cache && Date.now() - cache.at < CACHE_TTL) {
     return cache.value
   }
+  if (!force && inflight) return inflight
 
-  let row: TelegramBotRow | null = null
+  const task = loadTelegramBotRow()
+  inflight = task
   try {
-    row =
-      (
-        await db
-          .select()
-          .from(telegramBot)
-          .where(eq(telegramBot.id, 'default'))
-          .limit(1)
-      )[0] ?? null
-  } catch {
-    // 迁移尚未执行时不阻塞启动
-    row = null
+    const row = await task
+    cache = { value: row, at: Date.now() }
+    return row
+  } finally {
+    if (inflight === task) inflight = null
   }
-
-  cache = { value: row, at: Date.now() }
-  return row
 }
 
 export interface TelegramRuntime {

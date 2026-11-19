@@ -1,8 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
-import { eq } from 'drizzle-orm'
 
-import { db } from '#/db/client'
-import { authProvider } from '#/db/schema'
+import { listPublicAuthProviders } from '#/server/auth/public-providers'
 import { getSession } from '#/server/auth/guards'
 import { getPublicSiteConfig } from '#/server/settings'
 
@@ -14,14 +12,7 @@ export const getPublicAuthProvidersFn = createServerFn({
   method: 'GET',
 }).handler(async () => {
   try {
-    const rows = await db
-      .select({
-        providerId: authProvider.providerId,
-        displayName: authProvider.displayName,
-      })
-      .from(authProvider)
-      .where(eq(authProvider.enabled, true))
-    return rows
+    return await listPublicAuthProviders()
   } catch {
     return []
   }

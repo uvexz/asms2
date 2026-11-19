@@ -16,7 +16,6 @@ import {
   markRead,
   moveMessage,
   toggleStar,
-  unreadTotal,
 } from '#/server/mail/message'
 import { getSendUsage, usageDateFor } from '#/server/mail/quota'
 import { sendMail } from '#/server/mail/send'
@@ -139,13 +138,6 @@ export const updateMessageFn = createServerFn({ method: 'POST' })
       return { id: data.id }
     }),
   )
-
-export const unreadFn = createServerFn({ method: 'GET' }).handler(async () =>
-  attempt(async () => {
-    const user = await requireUser()
-    return unreadTotal(user.id)
-  }),
-)
 
 const sendSchema = z.object({
   fromMailboxId: z.string(),

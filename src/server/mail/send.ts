@@ -50,8 +50,10 @@ function assertAddresses(list: ParsedAddress[], label: string) {
 }
 
 export async function sendMail(user: SessionUser, input: SendMailInput) {
-  const settings = await getSiteSettings()
-  const box = await getMailboxOrThrow(user.id, input.fromMailboxId)
+  const [settings, box] = await Promise.all([
+    getSiteSettings(),
+    getMailboxOrThrow(user.id, input.fromMailboxId),
+  ])
 
   if (box.kind === 'temp' && !settings.allowTempSend) {
     throw new AppError('forbidden', '临时邮箱不支持发信', 403)
@@ -134,11 +136,7 @@ export async function sendMail(user: SessionUser, input: SendMailInput) {
       await refundSendQuota(user.id, usageDate)
     }
     if (error instanceof ProviderError) {
-      throw new AppError(
-        'provider_error',
-        `发送失败：${error.message}`,
-        502,
-      )
+      throw new AppError('provider_error', `发送失败：${error.message}`, 502)
     }
     throw error
   }
@@ -148,7 +146,7 @@ export async function sendMail(user: SessionUser, input: SendMailInput) {
   const plain = text ?? ''
   const snippet = makeSnippet(plain)
 
-  await db.batch([
+  const statements = [
     db.insert(message).values({
       id: messageId,
       userId: user.id,
@@ -190,22 +188,26 @@ export async function sendMail(user: SessionUser, input: SendMailInput) {
       .update(mailbox)
       .set({ lastSentAt: now, updatedAt: now })
       .where(eq(mailbox.id, box.id)),
-  ])
+  ]
 
   if (attachments.length > 0) {
-    await db.insert(attachment).values(
-      attachments.map((item) => ({
-        id: idPart(),
-        messageId,
-        providerAttachmentId: null,
-        filename: item.filename,
-        contentType: item.contentType ?? 'application/octet-stream',
-        size: Math.ceil((item.content.length * 3) / 4),
-        isInline: false,
-        contentId: null,
-      })),
+    statements.push(
+      db.insert(attachment).values(
+        attachments.map((item) => ({
+          id: idPart(),
+          messageId,
+          providerAttachmentId: null,
+          filename: item.filename,
+          contentType: item.contentType ?? 'application/octet-stream',
+          size: Math.ceil((item.content.length * 3) / 4),
+          isInline: false,
+          contentId: null,
+        })),
+      ) as never,
     )
   }
+
+  await db.batch(statements as never)
 
   return {
     id: messageId,

@@ -1,12 +1,9 @@
 import { queryOptions } from '@tanstack/react-query'
+import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 
 import type { Result } from '#/server/errors'
-import {
-  getQuotaFn,
-  listDomainsFn,
-  listMailboxesFn,
-  listMessagesFn,
-} from '#/server/fns/mail'
+import type { MessageListItem } from '#/server/mail/message'
+import { getQuotaFn, listDomainsFn, listMailboxesFn } from '#/server/fns/mail'
 
 export function unwrap<T>(result: Result<T>): T {
   if (!result.ok) {
@@ -30,33 +27,86 @@ export const quotaQuery = queryOptions({
   staleTime: 10_000,
 })
 
-export function messagesQuery(input: {
-  mailboxId?: string
-  folder: string
-  q?: string
-}) {
-  return queryOptions({
-    queryKey: ['messages', input],
-    queryFn: async () =>
-      unwrap(
-        await listMessagesFn({
-          data: {
-            mailboxId: input.mailboxId,
-            folder: input.folder as 'inbox',
-            q: input.q,
-          },
-        }),
-      ),
-    staleTime: 5_000,
-  })
-}
-
 export function domainsQuery(kind: 'permanent' | 'temp') {
   return queryOptions({
     queryKey: ['domains', kind],
     queryFn: async () => unwrap(await listDomainsFn({ data: { kind } })),
     staleTime: 60_000,
   })
+}
+
+export interface MessagePage {
+  items: MessageListItem[]
+  nextCursor: string | null
+}
+
+type MessagePatch = Partial<Pick<MessageListItem, 'isRead' | 'isStarred'>>
+
+/** 局部更新所有邮件列表/详情缓存，避免一次操作触发全部分页重新请求 */
+export function patchMessageCaches(
+  client: QueryClient,
+  id: string,
+  patch: MessagePatch,
+) {
+  client.setQueriesData<InfiniteData<MessagePage>>(
+    { queryKey: ['messages'] },
+    (old) => {
+      if (!old) return old
+      return {
+        ...old,
+        pages: old.pages.map((page) => {
+          if (!page.items.some((item) => item.id === id)) return page
+          return {
+            ...page,
+            items: page.items.map((item) =>
+              item.id === id ? { ...item, ...patch } : item,
+            ),
+          }
+        }),
+      }
+    },
+  )
+
+  client.setQueriesData<MessagePage>(
+    { queryKey: ['messages-latest'] },
+    (old) => {
+      if (!old || !old.items.some((item) => item.id === id)) return old
+      return {
+        ...old,
+        items: old.items.map((item) =>
+          item.id === id ? { ...item, ...patch } : item,
+        ),
+      }
+    },
+  )
+
+  client.setQueryData<Record<string, unknown>>(['message', id], (old) =>
+    old ? { ...old, ...patch } : old,
+  )
+}
+
+export function removeMessageFromCaches(client: QueryClient, id: string) {
+  client.setQueriesData<InfiniteData<MessagePage>>(
+    { queryKey: ['messages'] },
+    (old) =>
+      old
+        ? {
+            ...old,
+            pages: old.pages.map((page) => ({
+              ...page,
+              items: page.items.filter((item) => item.id !== id),
+            })),
+          }
+        : old,
+  )
+
+  client.setQueriesData<MessagePage>(
+    { queryKey: ['messages-latest'] },
+    (old) =>
+      old ? { ...old, items: old.items.filter((item) => item.id !== id) } : old,
+  )
+
+  client.removeQueries({ queryKey: ['message', id], exact: true })
 }
 
 export function formatTime(ms: number): string {

@@ -27,6 +27,7 @@ export const dailyUsage = sqliteTable(
   },
   (table) => [
     uniqueIndex('daily_usage_user_date_idx').on(table.userId, table.usageDate),
+    index('daily_usage_usage_date_idx').on(table.usageDate),
   ],
 )
 
@@ -83,7 +84,10 @@ export const unroutedMessage = sqliteTable(
       .notNull(),
     expiresAt: integer('expires_at', { mode: 'timestamp' }),
   },
-  (table) => [index('unrouted_created_idx').on(table.createdAt)],
+  (table) => [
+    index('unrouted_created_idx').on(table.createdAt),
+    index('unrouted_provider_msg_idx').on(table.providerMessageId),
+  ],
 )
 
 /** 管理操作审计：改配置、读正文、调配额 */

@@ -10,13 +10,9 @@ export type SiteSettings = typeof siteSettings.$inferSelect
 const CACHE_TTL = 10_000
 
 let cache: { value: SiteSettings; at: number } | null = null
+let inflight: Promise<SiteSettings> | null = null
 
-/** 单行站点配置；不存在时惰性建默认行，避免额外的 seed 步骤 */
-export async function getSiteSettings(force = false): Promise<SiteSettings> {
-  if (!force && cache && Date.now() - cache.at < CACHE_TTL) {
-    return cache.value
-  }
-
+async function loadSiteSettings(): Promise<SiteSettings> {
   let row = (
     await db
       .select()
@@ -26,7 +22,10 @@ export async function getSiteSettings(force = false): Promise<SiteSettings> {
   )[0]
 
   if (!row) {
-    await db.insert(siteSettings).values({ id: 'default' }).onConflictDoNothing()
+    await db
+      .insert(siteSettings)
+      .values({ id: 'default' })
+      .onConflictDoNothing()
     row = (
       await db
         .select()
@@ -36,24 +35,25 @@ export async function getSiteSettings(force = false): Promise<SiteSettings> {
     )[0]
   }
 
-  cache = { value: row, at: Date.now() }
   return row
 }
 
-export async function updateSiteSettings(
-  patch: Partial<Omit<SiteSettings, 'id'>>,
-  updatedBy?: string | null,
-): Promise<SiteSettings> {
-  await getSiteSettings()
-  await db
-    .update(siteSettings)
-    .set({ ...patch, updatedAt: new Date(), updatedBy: updatedBy ?? null })
-    .where(eq(siteSettings.id, 'default'))
-  return getSiteSettings(true)
-}
+/** 单行站点配置；不存在时惰性建默认行，避免额外的 seed 步骤 */
+export async function getSiteSettings(force = false): Promise<SiteSettings> {
+  if (!force && cache && Date.now() - cache.at < CACHE_TTL) {
+    return cache.value
+  }
+  if (!force && inflight) return inflight
 
-export function invalidateSiteSettings() {
-  cache = null
+  const task = loadSiteSettings()
+  inflight = task
+  try {
+    const row = await task
+    cache = { value: row, at: Date.now() }
+    return row
+  } finally {
+    if (inflight === task) inflight = null
+  }
 }
 
 /** 对外公开的站点信息，绝不包含密钥类字段 */

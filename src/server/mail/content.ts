@@ -6,14 +6,65 @@ import sanitizeHtml from 'sanitize-html'
  */
 const OPTIONS: sanitizeHtml.IOptions = {
   allowedTags: [
-    'a', 'abbr', 'b', 'blockquote', 'br', 'caption', 'center', 'code', 'col',
-    'colgroup', 'dd', 'div', 'dl', 'dt', 'em', 'font', 'h1', 'h2', 'h3', 'h4',
-    'h5', 'h6', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre', 's', 'small', 'span',
-    'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'tfoot', 'th', 'thead',
-    'tr', 'u', 'ul',
+    'a',
+    'abbr',
+    'b',
+    'blockquote',
+    'br',
+    'caption',
+    'center',
+    'code',
+    'col',
+    'colgroup',
+    'dd',
+    'div',
+    'dl',
+    'dt',
+    'em',
+    'font',
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    'hr',
+    'i',
+    'img',
+    'li',
+    'ol',
+    'p',
+    'pre',
+    's',
+    'small',
+    'span',
+    'strong',
+    'sub',
+    'sup',
+    'table',
+    'tbody',
+    'td',
+    'tfoot',
+    'th',
+    'thead',
+    'tr',
+    'u',
+    'ul',
   ],
   allowedAttributes: {
-    '*': ['style', 'class', 'align', 'valign', 'width', 'height', 'bgcolor', 'color', 'dir', 'colspan', 'rowspan'],
+    '*': [
+      'style',
+      'class',
+      'align',
+      'valign',
+      'width',
+      'height',
+      'bgcolor',
+      'color',
+      'dir',
+      'colspan',
+      'rowspan',
+    ],
     a: ['href', 'name', 'title', 'target', 'rel'],
     img: ['src', 'alt', 'title', 'width', 'height', 'srcset'],
     font: ['color', 'face', 'size'],
@@ -38,8 +89,10 @@ export function sanitizeEmailHtml(html: string): string {
   return sanitizeHtml(html, OPTIONS)
 }
 
-export function htmlToText(html: string): string {
-  return sanitizeHtml(html, { allowedTags: [], allowedAttributes: {} })
+/** 输入必须已经过 sanitizeEmailHtml；避免为了生成纯文本再解析一遍 HTML */
+export function sanitizedHtmlToText(html: string): string {
+  return html
+    .replace(/<(?:[^>"']|"[^"]*"|'[^']*')*>/g, ' ')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')

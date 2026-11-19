@@ -58,6 +58,10 @@ export const siteSettings = sqliteTable('site_settings', {
 
   trashRetentionDays: integer('trash_retention_days').notNull().default(30),
   orphanRetentionDays: integer('orphan_retention_days').notNull().default(7),
+  /** 已删除邮箱的邮件与墓碑保留天数；实际清理还会等待地址冷却期结束 */
+  deletedMailboxRetentionDays: integer('deleted_mailbox_retention_days')
+    .notNull()
+    .default(30),
   timezone: text('timezone').notNull().default('Asia/Shanghai'),
 
   reservedWordsJson: text('reserved_words_json'),

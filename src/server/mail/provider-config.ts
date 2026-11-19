@@ -50,24 +50,41 @@ export async function resolveSendProviderForDomain(
   domainId: string,
 ): Promise<ResolvedProvider> {
   const row = (
-    await db.select().from(domain).where(eq(domain.id, domainId)).limit(1)
+    await db
+      .select({ domain, config: providerConfig })
+      .from(domain)
+      .innerJoin(providerConfig, eq(providerConfig.id, domain.providerConfigId))
+      .where(eq(domain.id, domainId))
+      .limit(1)
   )[0]
 
   if (!row) throw new AppError('validation_failed', '域名不存在')
-  if (row.status !== 'verified') {
+  if (row.domain.status !== 'verified') {
     throw new AppError('validation_failed', '域名尚未通过验证，暂不能发信')
   }
-  if (!row.sendingEnabled) {
+  if (!row.domain.sendingEnabled) {
     throw new AppError('validation_failed', '该域名未开启发信')
   }
+  if (row.config.status !== 'active') {
+    throw new AppError('provider_error', '服务商已被停用', 503)
+  }
 
-  const resolved = await getProviderById(row.providerConfigId)
-  if (!resolved.provider.capabilities.send) {
+  const provider = getProvider(row.config.kind)
+  if (!provider.capabilities.send) {
     throw new AppError(
       'not_implemented',
-      `${resolved.config.label} 尚未支持发信`,
+      `${row.config.label} 尚未支持发信`,
       501,
     )
   }
-  return resolved
+
+  return {
+    provider,
+    config: row.config,
+    runtime: {
+      apiKey: decryptSecret(row.config.apiKeyEnc),
+      apiBaseUrl: row.config.apiBaseUrl,
+      accountId: row.config.externalAccountId,
+    },
+  }
 }

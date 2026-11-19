@@ -54,7 +54,11 @@ export const mailbox = sqliteTable(
     uniqueIndex('mailbox_domain_local_idx').on(table.domainId, table.localPart),
     index('mailbox_user_kind_idx').on(table.userId, table.kind, table.status),
     index('mailbox_sweep_idx').on(table.kind, table.status, table.expiresAt),
-    index('mailbox_address_idx').on(table.address),
+    index('mailbox_user_kind_created_idx').on(
+      table.userId,
+      table.kind,
+      table.createdAt,
+    ),
   ],
 )
 
@@ -130,8 +134,15 @@ export const message = sqliteTable(
       table.mailboxId,
       table.folder,
       table.receivedAt,
+      table.id,
     ),
-    index('message_user_idx').on(table.userId, table.folder, table.receivedAt),
+    index('message_user_idx').on(
+      table.userId,
+      table.folder,
+      table.receivedAt,
+      table.id,
+    ),
+    index('message_folder_received_idx').on(table.folder, table.receivedAt),
     uniqueIndex('message_provider_uidx').on(
       table.providerConfigId,
       table.providerMessageId,

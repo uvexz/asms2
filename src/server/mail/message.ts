@@ -1,4 +1,4 @@
-import { and, desc, eq, like, lt, or, sql } from 'drizzle-orm'
+import { and, desc, eq, like, lt, ne, or, sql } from 'drizzle-orm'
 
 import { db } from '#/db/client'
 import { attachment, mailbox, message, messageBody } from '#/db/schema'
@@ -35,6 +35,15 @@ export interface MessageListItem {
   createdAt: number
 }
 
+/** 邮箱软删后其邮件立即从列表/详情/操作中隐藏，保留期后再由 sweep 硬删 */
+function visibleMailboxCondition() {
+  return sql`exists (
+    select 1 from ${mailbox}
+    where ${mailbox.id} = ${message.mailboxId}
+      and ${mailbox.status} <> 'deleted'
+  )`
+}
+
 function parseCursor(cursor?: string): { at: Date; id: string } | null {
   if (!cursor) return null
   const index = cursor.lastIndexOf('_')
@@ -57,6 +66,7 @@ export async function listMessages(
   const conditions = [
     eq(message.userId, userId),
     eq(message.folder, filters.folder),
+    ne(mailbox.status, 'deleted'),
   ]
 
   if (filters.mailboxId) {
@@ -104,7 +114,7 @@ export async function listMessages(
       createdAt: message.createdAt,
     })
     .from(message)
-    .leftJoin(mailbox, eq(mailbox.id, message.mailboxId))
+    .innerJoin(mailbox, eq(mailbox.id, message.mailboxId))
     .where(and(...conditions))
     .orderBy(desc(message.receivedAt), desc(message.id))
     .limit(limit + 1)
@@ -149,7 +159,11 @@ export async function listMessages(
   }
 }
 
-export async function getMessage(userId: string, messageId: string) {
+export async function getMessage(
+  userId: string,
+  messageId: string,
+  options: { includeRaw?: boolean; includeHeaders?: boolean } = {},
+) {
   const row = (
     await db
       .select({
@@ -159,26 +173,33 @@ export async function getMessage(userId: string, messageId: string) {
       })
       .from(message)
       .leftJoin(messageBody, eq(messageBody.messageId, message.id))
-      .leftJoin(mailbox, eq(mailbox.id, message.mailboxId))
-      .where(and(eq(message.id, messageId), eq(message.userId, userId)))
+      .innerJoin(mailbox, eq(mailbox.id, message.mailboxId))
+      .where(
+        and(
+          eq(message.id, messageId),
+          eq(message.userId, userId),
+          ne(mailbox.status, 'deleted'),
+        ),
+      )
       .limit(1)
   )[0]
 
   if (!row) throw new AppError('not_found', '邮件不存在', 404)
 
-  const attachments = await db
-    .select()
-    .from(attachment)
-    .where(eq(attachment.messageId, messageId))
+  const attachments =
+    row.message.attachmentCount > 0
+      ? await db
+          .select()
+          .from(attachment)
+          .where(eq(attachment.messageId, messageId))
+      : []
 
   const m = row.message
   return {
     ...m,
     mailboxAddress: row.mailboxAddress ?? '',
     html: row.body?.htmlSanitized ?? null,
-    htmlRaw: row.body?.htmlRaw ?? null,
     text: row.body?.textBody ?? null,
-    headers: row.body?.headersJson ? JSON.parse(row.body.headersJson) : {},
     to: JSON.parse(m.toJson) as string[],
     cc: m.ccJson ? (JSON.parse(m.ccJson) as string[]) : [],
     bcc: m.bccJson ? (JSON.parse(m.bccJson) as string[]) : [],
@@ -191,14 +212,32 @@ export async function getMessage(userId: string, messageId: string) {
       size: item.size,
       isInline: item.isInline,
     })),
+    ...(options.includeRaw ? { htmlRaw: row.body?.htmlRaw ?? null } : {}),
+    ...(options.includeHeaders
+      ? {
+          headers: row.body?.headersJson
+            ? JSON.parse(row.body.headersJson)
+            : {},
+        }
+      : {}),
   }
 }
 
-export async function markRead(userId: string, messageId: string, read: boolean) {
+export async function markRead(
+  userId: string,
+  messageId: string,
+  read: boolean,
+) {
   const result = await db
     .update(message)
     .set({ isRead: read })
-    .where(and(eq(message.id, messageId), eq(message.userId, userId)))
+    .where(
+      and(
+        eq(message.id, messageId),
+        eq(message.userId, userId),
+        visibleMailboxCondition(),
+      ),
+    )
     .returning({ id: message.id })
   if (result.length === 0) throw new AppError('not_found', '邮件不存在', 404)
 }
@@ -212,7 +251,13 @@ export async function toggleStar(
     await db
       .select({ isStarred: message.isStarred })
       .from(message)
-      .where(and(eq(message.id, messageId), eq(message.userId, userId)))
+      .where(
+        and(
+          eq(message.id, messageId),
+          eq(message.userId, userId),
+          visibleMailboxCondition(),
+        ),
+      )
       .limit(1)
   )[0]
   if (!current) throw new AppError('not_found', '邮件不存在', 404)
@@ -221,7 +266,7 @@ export async function toggleStar(
   await db
     .update(message)
     .set({ isStarred: next })
-    .where(eq(message.id, messageId))
+    .where(and(eq(message.id, messageId), eq(message.userId, userId)))
   return next
 }
 
@@ -233,21 +278,13 @@ export async function moveMessage(
   const result = await db
     .update(message)
     .set({ folder })
-    .where(and(eq(message.id, messageId), eq(message.userId, userId)))
-    .returning({ id: message.id })
-  if (result.length === 0) throw new AppError('not_found', '邮件不存在', 404)
-}
-
-export async function unreadTotal(userId: string) {
-  const rows = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(message)
     .where(
       and(
+        eq(message.id, messageId),
         eq(message.userId, userId),
-        eq(message.folder, 'inbox'),
-        eq(message.isRead, false),
+        visibleMailboxCondition(),
       ),
     )
-  return Number(rows[0]?.count ?? 0)
+    .returning({ id: message.id })
+  if (result.length === 0) throw new AppError('not_found', '邮件不存在', 404)
 }

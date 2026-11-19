@@ -139,7 +139,7 @@ erDiagram
 
 | 表              | 关键字段                                                                                                                                                             | 说明                                    |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `site_settings` | 单行 `default`；站点资料、注册开关、默认配额、前缀长度、`temp_ttl_minutes`（考察期）、`temp_grace_minutes`、冷却时长、`allow_temp_send`、`admin_can_read_mail`、时区 | typed 单行配置，零散扩展放 `extra_json` |
+| `site_settings` | 单行 `default`；站点资料、注册开关、默认配额、前缀长度、`temp_ttl_minutes`（考察期）、`temp_grace_minutes`、冷却时长、`deleted_mailbox_retention_days`、`allow_temp_send`、`admin_can_read_mail`、时区 | typed 单行配置，零散扩展放 `extra_json` |
 | `auth_provider` | providerId(UK), displayName, enabled, clientId, clientSecretEnc, issuer, scopes                                                                                      | 保存后触发 auth 实例重建                |
 | `app_meta`      | key(PK), value                                                                                                                                                       | 配置版本号等                            |
 
