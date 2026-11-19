@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { RiArrowRightLine } from '@remixicon/react'
+import { RiArrowRightLine, RiGithubLine } from '@remixicon/react'
 
 import { ThemeToggle } from '@/components/application/theme/theme-toggle'
 import { buttonStyles } from '@/components/base/buttons/button'
-import { linkButtonStyles } from '@/components/base/buttons/link-button'
+import { LinkButton, linkButtonStyles } from '@/components/base/buttons/link-button'
 import { cx } from '@/utils/cx'
 
 import {
@@ -402,7 +402,21 @@ export function LandingPage({ site, signedIn }: LandingPageProps) {
               <p>
                 © {year} {siteName}
               </p>
-              <p>{site?.footerText ?? description}</p>
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                <p>{site?.footerText ?? description}</p>
+                <LinkButton
+                  href="https://github.com/uvexz/asms2"
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  aria-label="ASMS2 源码仓库（GitHub，新窗口打开）"
+                  variant="secondary"
+                  size="xs"
+                  leadingIcon={RiGithubLine}
+                  className="text-caption-1-regular"
+                >
+                  ASMS2
+                </LinkButton>
+              </div>
             </div>
           </footer>
         </main>
