@@ -64,6 +64,9 @@ async function buildAuth(): Promise<AuthInstance> {
     { clientId: string; clientSecret: string }
   > = {}
   const oauthConfigs: Record<string, unknown>[] = []
+  // 管理员配置并启用的 IdP 即本站可信来源：既用于用户主动绑定，
+  // 也允许登录时按「同邮箱 + 本地已验证」隐式合并到已有账号
+  const trustedProviders: string[] = []
 
   for (const provider of rows) {
     if (!provider.enabled) continue
@@ -81,6 +84,7 @@ async function buildAuth(): Promise<AuthInstance> {
         clientId: provider.clientId,
         clientSecret,
       }
+      trustedProviders.push(provider.kind)
     } else if (provider.kind === 'oidc' && provider.issuer) {
       oauthConfigs.push({
         providerId: provider.providerId,
@@ -92,6 +96,7 @@ async function buildAuth(): Promise<AuthInstance> {
           : ['openid', 'email', 'profile'],
         pkce: true,
       })
+      trustedProviders.push(provider.providerId)
     }
   }
 
@@ -168,7 +173,20 @@ async function buildAuth(): Promise<AuthInstance> {
         }
       },
     },
-    account: { encryptOAuthTokens: true },
+    account: {
+      encryptOAuthTokens: true,
+      accountLinking: {
+        enabled: true,
+        trustedProviders,
+        // 允许绑定邮箱与本站不同的账号（常见于个人 GitHub）：
+        // 绑定动作本身要求「已登录 + 完成目标平台授权」，风险可控
+        allowDifferentEmails: true,
+        // 解绑最后一个账号会把人锁在门外，业务层已拦，这里保持兜底
+        allowUnlinkingAll: false,
+        // 绑定时不覆盖本地昵称/头像，避免身份信息被 IdP 改写
+        updateUserInfoOnLink: false,
+      },
+    },
     user: {
       additionalFields: {
         mailboxLimit: {

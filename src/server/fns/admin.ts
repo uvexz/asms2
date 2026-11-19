@@ -1,15 +1,17 @@
 import { createServerFn } from '@tanstack/react-start'
-import { desc, eq, ne, sql } from 'drizzle-orm'
+import { desc, eq, inArray, ne, sql } from 'drizzle-orm'
 import { customAlphabet } from 'nanoid'
 import { z } from 'zod'
 
 import { db } from '#/db/client'
 import {
+  account,
   auditLog,
   authProvider,
   domain,
   mailbox,
   message,
+  passkey,
   providerConfig,
   session,
   siteSettings,
@@ -19,6 +21,8 @@ import {
   webhookEvent,
 } from '#/db/schema'
 import { clientIp, requireAdmin, userAgent } from '#/server/auth/guards'
+import { accountKind, accountLabel } from '#/server/auth/provider-labels'
+import type { LoginAccountKind } from '#/server/auth/provider-labels'
 import { invalidateAuthCache } from '#/server/auth'
 import { invalidatePublicLoginConfig } from '#/server/auth/public-providers'
 import { encryptSecret, last4 } from '#/server/crypto/secret-box'
@@ -1067,11 +1071,73 @@ export const adminListUsersFn = createServerFn({ method: 'POST' })
         .offset(offset)
 
       const hasMore = rows.length > limit
+      const page = hasMore ? rows.slice(0, limit) : rows
+      const ids = page.map((row) => row.id)
+
+      // 登录来源按 account 行（credential / 各 OAuth provider）聚合，
+      // Passkey 在独立表里，按用户计数单独展示
+      const [links, passkeyCounts, loginProviders] = await Promise.all([
+        ids.length > 0
+          ? db
+              .select({
+                userId: account.userId,
+                providerId: account.providerId,
+              })
+              .from(account)
+              .where(inArray(account.userId, ids))
+              .orderBy(account.createdAt)
+          : Promise.resolve([] as { userId: string; providerId: string }[]),
+        ids.length > 0
+          ? db
+              .select({
+                userId: passkey.userId,
+                count: sql<number>`count(*)`,
+              })
+              .from(passkey)
+              .where(inArray(passkey.userId, ids))
+              .groupBy(passkey.userId)
+          : Promise.resolve([] as { userId: string; count: number }[]),
+        db
+          .select({
+            providerId: authProvider.providerId,
+            displayName: authProvider.displayName,
+            kind: authProvider.kind,
+          })
+          .from(authProvider),
+      ])
+
+      const providerById = new Map(
+        loginProviders.map((row) => [row.providerId, row]),
+      )
+      const passkeyByUser = new Map(
+        passkeyCounts.map((row) => [row.userId, Number(row.count)]),
+      )
+
+      // 同一 provider 理论上只有一条 account 行；历史脏数据存在重复，这里按 providerId 去重
+      const methodsByUser = new Map<
+        string,
+        { providerId: string; label: string; kind: LoginAccountKind }[]
+      >()
+      for (const link of links) {
+        const provider = providerById.get(link.providerId)
+        const list = methodsByUser.get(link.userId) ?? []
+        if (list.some((item) => item.providerId === link.providerId)) continue
+        list.push({
+          providerId: link.providerId,
+          label: accountLabel(link.providerId, provider?.displayName),
+          kind: accountKind(link.providerId, provider?.kind),
+        })
+        methodsByUser.set(link.userId, list)
+      }
+
       return {
-        rows: (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
+        rows: page.map((row) => ({
           ...row,
           createdAt: row.createdAt.getTime(),
           mailboxCount: Number(row.mailboxCount ?? 0),
+          passkeyCount: passkeyByUser.get(row.id) ?? 0,
+          // 顺序即绑定顺序，第一条是注册时的来源
+          loginMethods: methodsByUser.get(row.id) ?? [],
         })),
         hasMore,
       }

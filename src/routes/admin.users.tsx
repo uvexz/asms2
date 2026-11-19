@@ -5,6 +5,7 @@ import { RiSaveLine, RiSearchLine } from '@remixicon/react'
 
 import { Button } from '@/components/base/buttons/button'
 import { Chip } from '@/components/base/badges/chip'
+import type { ChipColor } from '@/components/base/badges/chip'
 import { Input } from '@/components/base/input/input'
 import { Select, SelectItem } from '@/components/base/select/select'
 import { Switch } from '@/components/base/switch/switch'
@@ -22,6 +23,22 @@ export const Route = createFileRoute('/admin/users')({
 
 const PAGE_SIZE = 50
 
+type LoginMethodKind = 'email' | 'google' | 'github' | 'oidc'
+
+interface LoginMethod {
+  providerId: string
+  label: string
+  kind: LoginMethodKind
+}
+
+/** 登录来源一眼可辨：本站密码用中性色，OAuth 品牌蓝色，通用 OIDC 紫色 */
+const METHOD_CHIP_COLOR: Record<LoginMethodKind, ChipColor> = {
+  email: 'neutral',
+  google: 'blue',
+  github: 'blue',
+  oidc: 'purple',
+}
+
 interface UserRow {
   id: string
   name: string
@@ -32,6 +49,8 @@ interface UserRow {
   sendLimit: number | null
   createdAt: number
   mailboxCount: number
+  passkeyCount: number
+  loginMethods: LoginMethod[]
 }
 
 function AdminUsers() {
@@ -191,6 +210,31 @@ function UserCard({ row, onSaved }: { row: UserRow; onSaved: () => void }) {
           <p className="truncate text-caption-1-regular text-text-tertiary">
             {row.email}
           </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className="text-caption-1-regular text-text-tertiary">
+              登录来源
+            </span>
+            {row.loginMethods.length === 0 ? (
+              <span className="text-caption-1-regular text-text-tertiary">
+                —
+              </span>
+            ) : (
+              row.loginMethods.map((method) => (
+                <Chip
+                  key={method.providerId}
+                  variant="caption"
+                  color={METHOD_CHIP_COLOR[method.kind]}
+                >
+                  {method.label}
+                </Chip>
+              ))
+            )}
+            {row.passkeyCount > 0 ? (
+              <Chip variant="caption" color="cyan">
+                Passkey{row.passkeyCount > 1 ? ` ×${row.passkeyCount}` : ''}
+              </Chip>
+            ) : null}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-caption-1-regular text-text-secondary">

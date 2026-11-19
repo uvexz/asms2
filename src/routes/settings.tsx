@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ComponentType } from 'react'
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -6,7 +7,11 @@ import {
   RiDeleteBinLine,
   RiFileCopyLine,
   RiFingerprintLine,
+  RiGithubLine,
+  RiGoogleLine,
   RiKey2Line,
+  RiLinkM,
+  RiMailLine,
   RiRefreshLine,
   RiSaveLine,
   RiTelegram2Line,
@@ -26,6 +31,7 @@ import { ThemeToggle } from '@/components/application/theme/theme-toggle'
 import { PageSection, KeyValue } from '@/components/admin/ui'
 import { authClient } from '#/lib/auth-client'
 import { loginConfigQuery, mailboxesQuery, quotaQuery, unwrap } from '#/lib/api'
+import { listSsoAccountsFn, unlinkSsoAccountFn } from '#/server/fns/account'
 import {
   createTelegramBindCodeFn,
   telegramStatusFn,
@@ -34,6 +40,13 @@ import {
 } from '#/server/fns/telegram'
 
 export const Route = createFileRoute('/settings')({
+  // OAuth 绑定回调会带 linked / error，用完即清
+  validateSearch: (search: Record<string, unknown>) => {
+    const result: { linked?: string; error?: string } = {}
+    if (typeof search.linked === 'string') result.linked = search.linked
+    if (typeof search.error === 'string') result.error = search.error
+    return result
+  },
   beforeLoad: ({ context }) => {
     if (!context.session) {
       throw redirect({ to: '/login' })
@@ -245,6 +258,8 @@ function SettingsPage() {
       </PageSection>
 
       <SecuritySection />
+
+      <SsoSection />
 
       <TelegramSection />
 
@@ -807,6 +822,263 @@ function SecuritySection() {
         pendingLabel="删除中…"
         onConfirm={async () => {
           if (deleting) await removePasskey(deleting)
+        }}
+      />
+    </PageSection>
+  )
+}
+
+/* ------------------------------------------------------------- third-party sso */
+
+type SsoKind = 'email' | 'google' | 'github' | 'oidc'
+
+interface SsoAccount {
+  id: string
+  providerId: string
+  label: string
+  kind: SsoKind
+  linkedAt: number
+  enabled: boolean
+  removable: boolean
+}
+
+const SSO_ICONS: Record<SsoKind, ComponentType<{ className?: string }>> = {
+  email: RiMailLine,
+  google: RiGoogleLine,
+  github: RiGithubLine,
+  oidc: RiLinkM,
+}
+
+/** OAuth 回调失败时 better-auth 会带 `?error=<code>` 回到本页 */
+const SSO_ERROR_MESSAGES: Record<string, string> = {
+  email_does_not_match: '该平台账号的邮箱与本站不一致，无法绑定',
+  account_already_linked_to_different_user: '该平台账号已绑定到其他用户',
+  unable_to_link_account: '绑定失败，请确认该平台账号可用后重试',
+  oauth_provider_not_found: '该登录方式已被管理员停用',
+  state_not_found: '绑定请求已过期，请重新发起',
+  access_denied: '已取消授权',
+}
+
+function SsoSection() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const search = Route.useSearch()
+
+  const query = useQuery({
+    queryKey: ['sso-accounts'],
+    queryFn: async () => unwrap(await listSsoAccountsFn()),
+    staleTime: 20_000,
+  })
+
+  const [busy, setBusy] = useState<string | null>(null)
+  const [unlinking, setUnlinking] = useState<SsoAccount | null>(null)
+  // 同一次回调只提示一遍（清查询串前可能有多次渲染）
+  const handled = useRef<string | null>(null)
+
+  useEffect(() => {
+    const key = search.error
+      ? `error:${search.error}`
+      : search.linked
+        ? `linked:${search.linked}`
+        : null
+    if (!key || handled.current === key) return
+    handled.current = key
+    if (search.error) {
+      toast.error(
+        SSO_ERROR_MESSAGES[search.error] ?? `绑定失败（${search.error}）`,
+      )
+    } else {
+      toast.success('已绑定第三方账号')
+    }
+    void queryClient.invalidateQueries({ queryKey: ['sso-accounts'] })
+    // 清掉查询串，避免刷新页面时重复提示
+    void navigate({
+      to: '/settings',
+      search: { linked: undefined, error: undefined },
+      replace: true,
+    })
+  }, [search.linked, search.error, navigate, queryClient])
+
+  async function bind(providerId: string) {
+    setBusy(providerId)
+    const { error } = await authClient.linkSocial({
+      provider: providerId,
+      callbackURL: `/settings?linked=${encodeURIComponent(providerId)}`,
+      errorCallbackURL: '/settings',
+    })
+    // 成功时浏览器已经跳去目标平台，这里只处理没能发起授权的情况
+    setBusy(null)
+    if (error) toast.error(error.message ?? '发起绑定失败，请稍后重试')
+  }
+
+  async function unlink(row: SsoAccount) {
+    const result = await unlinkSsoAccountFn({ data: { accountId: row.id } })
+    if (!result.ok) {
+      toast.error(result.error.message)
+      throw new Error(result.error.message)
+    }
+    toast.success('已解绑')
+    setUnlinking(null)
+    await query.refetch()
+  }
+
+  const accounts = query.data?.accounts ?? []
+  const bindable = query.data?.bindable ?? []
+
+  return (
+    <PageSection
+      title="第三方账号"
+      description="绑定后可用对应平台直接登录；解绑前请确认还有其他可用的登录方式"
+      actions={
+        <Button
+          size="small"
+          variant="secondary"
+          leadingIcon={RiRefreshLine}
+          onClick={() => void query.refetch()}
+        >
+          刷新状态
+        </Button>
+      }
+    >
+      {query.isLoading ? (
+        <div className="flex items-center gap-2 text-caption-1-regular text-text-tertiary">
+          <Spinner className="size-4" /> 加载中…
+        </div>
+      ) : null}
+
+      {query.isError ? (
+        <ErrorState
+          compact
+          title="读取登录方式失败"
+          error={query.error}
+          onRetry={() => void query.refetch()}
+          className="py-4"
+        />
+      ) : null}
+
+      {query.data ? (
+        <div className="flex flex-col gap-2">
+          {accounts.length === 0 ? (
+            <p className="text-caption-1-regular text-text-tertiary">
+              还没有绑定任何登录账号。
+            </p>
+          ) : null}
+
+          {accounts.map((row) => {
+            const Icon = SSO_ICONS[row.kind]
+            return (
+              <div
+                key={row.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-button-default px-3 py-2"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <Icon
+                    className="size-4 shrink-0 text-foreground-icon-primary"
+                    aria-hidden
+                  />
+                  <span className="truncate text-body-medium text-text-primary">
+                    {row.label}
+                  </span>
+                  {row.kind === 'email' ? <Chip color="gray">本站</Chip> : null}
+                  {!row.enabled ? <Chip color="yellow">已停用</Chip> : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-caption-1-regular text-text-tertiary">
+                    绑定于 {new Date(row.linkedAt).toLocaleDateString('zh-CN')}
+                  </span>
+                  {row.kind === 'email' ? null : row.removable ? (
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      onClick={() => setUnlinking(row)}
+                    >
+                      解绑
+                    </Button>
+                  ) : (
+                    <span className="text-caption-1-regular text-text-tertiary">
+                      需保留至少一种登录方式
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+
+          {bindable.length > 0 ? (
+            <div className="mt-2 flex flex-col gap-2">
+              <p className="text-caption-1-semibold text-text-secondary">
+                可绑定
+              </p>{' '}
+              {bindable.map((option) => {
+                const Icon = SSO_ICONS[option.kind]
+                return (
+                  <div
+                    key={option.providerId}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border-button-default px-3 py-2"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Icon
+                        className="size-4 shrink-0 text-foreground-icon-tertiary"
+                        aria-hidden
+                      />
+                      <span className="truncate text-body-medium text-text-secondary">
+                        {option.label}
+                      </span>
+                      {option.kind === 'oidc' ? (
+                        <code
+                          className="font-mono text-caption-1-regular text-text-tertiary"
+                          dir="ltr"
+                        >
+                          {option.providerId}
+                        </code>
+                      ) : null}
+                    </div>
+                    <Button
+                      size="small"
+                      variant="secondary"
+                      leadingIcon={RiLinkM}
+                      onClick={() => void bind(option.providerId)}
+                      disabled={busy === option.providerId}
+                    >
+                      {busy === option.providerId ? '跳转中…' : '绑定'}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          ) : null}
+
+          {bindable.length === 0 &&
+          !accounts.some((row) => row.kind !== 'email') ? (
+            <p className="text-caption-1-regular text-text-tertiary">
+              管理员尚未配置可绑定的第三方登录方式。
+            </p>
+          ) : null}
+
+          {accounts.some((row) => row.kind !== 'email') ? (
+            <p className="mt-1 text-caption-1-regular text-text-tertiary">
+              解绑仅影响本站登录方式，不会注销你在该平台的账号。
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <AlertDialog
+        isOpen={Boolean(unlinking)}
+        onOpenChange={(open) => {
+          if (!open) setUnlinking(null)
+        }}
+        title="解绑登录账号"
+        description={
+          unlinking
+            ? `解绑后将无法再用「${unlinking.label}」登录本站，确定继续吗？`
+            : ''
+        }
+        confirmLabel="解绑"
+        cancelLabel="取消"
+        pendingLabel="解绑中…"
+        onConfirm={async () => {
+          if (unlinking) await unlink(unlinking)
         }}
       />
     </PageSection>

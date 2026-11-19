@@ -315,6 +315,14 @@ Better Auth 的 `emailAndPassword` / `socialProviders` / 插件列表在实例�
 - 删除方式只删配置行，`account` 里的密码/社交凭证保留；重新添加后仍可登录。
 - Passkey 的 `rpID` / `origin` 取自 `BETTER_AUTH_URL`，因此生产必须使用 HTTPS。
 
+账号绑定（`account.accountLinking`）：
+
+- 已启用的 OAuth 方式全部进 `trustedProviders`：管理员配置的 IdP 即本站可信来源，绑定不再依赖 IdP 返回 `email_verified`。
+- `allowDifferentEmails: true`：允许绑定邮箱不同的账号（个人 GitHub 常见）；前提是已登录并完成目标平台授权。
+- `/settings`「第三方账号」列出已绑定的 `account` 行与仍可绑定的方式，解绑走 `unlinkSsoAccountFn`（带 `userId` 兜底 + 审计日志）。
+- 解绑后登录方式不能归零：服务端按 `account` 行 + Passkey 计数，剩最后一种时拒绝。
+- 管理员用户页按 `account` 行展示「登录来源」，OIDC 取 `auth_provider.display_name`，Passkey 单独计数。
+
 邮箱验证（`site_settings.email_verification_required`）：
 
 - 只影响邮箱密码注册的新用户；开启时会把存量用户回填为已验证，避免全员被锁。
@@ -330,7 +338,7 @@ Better Auth 的 `emailAndPassword` / `socialProviders` / 插件列表在实例�
 | `/login`、`/register`                                       | 认证（按站点配置渲染登录方式）       |
 | `/verify-email`                                             | 邮箱验证提醒与重发                   |
 | `/mail`、`/mail/$messageId`                                 | 三栏邮件界面，阅读区可深链           |
-| `/settings`                                                 | 昵称、配额、登录与安全、API Key      |
+| `/settings`                                                 | 昵称、配额、登录与安全、第三方账号、API Key |
 | `/admin`、`/admin/{site,domains,providers,auth,users,logs}` | 管理后台                             |
 
 ### 6.2 布局
