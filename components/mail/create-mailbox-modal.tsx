@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { getRouteApi } from '@tanstack/react-router'
 import { RiAddLine, RiRefreshLine } from '@remixicon/react'
 
 import { Button } from '@/components/base/buttons/button'
@@ -19,16 +20,9 @@ import { toast } from '@/components/base/toast/toast'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { createMailboxFn } from '#/server/fns/mail'
 import { domainsQuery } from '#/lib/api'
+import { randomNameLocalPart } from '#/lib/name-prefix'
 
-const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
-
-function randomPart(length: number) {
-  let out = ''
-  for (let i = 0; i < length; i += 1) {
-    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)]
-  }
-  return out
-}
+const rootApi = getRouteApi('__root__')
 
 export function CreateMailboxModal({
   isOpen,
@@ -38,22 +32,34 @@ export function CreateMailboxModal({
   onOpenChange: (open: boolean) => void
 }) {
   const queryClient = useQueryClient()
+  const { site } = rootApi.useLoaderData()
   const [kind, setKind] = useState<'permanent' | 'temp'>('permanent')
   const [prefix, setPrefix] = useState('')
   const [domainId, setDomainId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  const tempPrefixMin = Math.max(site?.tempPrefixMin ?? 8, 8)
+  const permanentPrefixMin = site?.permanentPrefixMin ?? 3
+  const prefixMax = site?.prefixMax ?? 32
+
   const domains = useQuery({ ...domainsQuery(kind), enabled: isOpen })
 
   useEffect(() => {
     if (!isOpen) return
-    setPrefix(kind === 'temp' ? randomPart(10) : '')
+    setPrefix(
+      kind === 'temp'
+        ? randomNameLocalPart({
+            minLength: tempPrefixMin,
+            maxLength: prefixMax,
+          })
+        : '',
+    )
     setDomainId(null)
-  }, [kind, isOpen])
+  }, [kind, isOpen, tempPrefixMin, prefixMax])
 
   const selectedDomain = useMemo(() => {
     const list = domains.data ?? []
-    return list.find((item) => item.id === domainId) ?? list[0]
+    return list.find((item) => item.id === domainId) ?? list.at(0)
   }, [domainId, domains.data])
 
   async function submit() {
@@ -77,7 +83,9 @@ export function CreateMailboxModal({
     }
 
     toast.success(`已创建 ${result.data.address}`)
-    await navigator.clipboard.writeText(result.data.address).catch(() => undefined)
+    await navigator.clipboard
+      .writeText(result.data.address)
+      .catch(() => undefined)
     await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
     onOpenChange(false)
   }
@@ -104,14 +112,20 @@ export function CreateMailboxModal({
               }}
               aria-label="邮箱类型"
             >
-              <SegmentedControlItem id="permanent">长期邮箱</SegmentedControlItem>
+              <SegmentedControlItem id="permanent">
+                长期邮箱
+              </SegmentedControlItem>
               <SegmentedControlItem id="temp">临时邮箱</SegmentedControlItem>
             </SegmentedControl>
 
             <div className="flex items-end gap-2">
               <Input
                 label="前缀"
-                placeholder={kind === 'temp' ? '至少 8 位' : '至少 3 位'}
+                placeholder={
+                  kind === 'temp'
+                    ? `至少 ${tempPrefixMin} 位`
+                    : `至少 ${permanentPrefixMin} 位`
+                }
                 value={prefix}
                 onChange={setPrefix}
                 className="flex-1"
@@ -126,7 +140,14 @@ export function CreateMailboxModal({
                 <Button
                   variant="secondary"
                   leadingIcon={RiRefreshLine}
-                  onClick={() => setPrefix(randomPart(10))}
+                  onClick={() =>
+                    setPrefix(
+                      randomNameLocalPart({
+                        minLength: tempPrefixMin,
+                        maxLength: prefixMax,
+                      }),
+                    )
+                  }
                   className="mb-5"
                 >
                   随机
@@ -142,7 +163,11 @@ export function CreateMailboxModal({
               isDisabled={!domains.data || domains.data.length === 0}
             >
               {(domains.data ?? []).map((item) => (
-                <SelectItem key={item.id} id={item.id} textValue={item.hostname}>
+                <SelectItem
+                  key={item.id}
+                  id={item.id}
+                  textValue={item.hostname}
+                >
                   {item.hostname}
                 </SelectItem>
               ))}

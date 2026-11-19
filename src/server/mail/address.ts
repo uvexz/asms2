@@ -1,5 +1,3 @@
-import { customAlphabet } from 'nanoid'
-
 import { AppError } from '#/server/errors'
 import type { SiteSettings } from '#/server/settings'
 
@@ -22,7 +20,6 @@ export const DEFAULT_RESERVED_WORDS = [
 ]
 
 const LOCAL_PART_RE = /^[a-z0-9]+$/
-const randomPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 10)
 
 export function getReservedWords(settings: SiteSettings): string[] {
   if (!settings.reservedWordsJson) return DEFAULT_RESERVED_WORDS
@@ -62,9 +59,4 @@ export function validateLocalPart(
     throw new AppError('validation_failed', '该前缀为系统保留字')
   }
   return localPart
-}
-
-export function randomLocalPart(length = 10): string {
-  const safeLength = Math.min(Math.max(length, 8), 32)
-  return randomPart().slice(0, safeLength)
 }

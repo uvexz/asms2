@@ -1,7 +1,7 @@
 import { db } from '#/db/client'
 import { telegramUpdate } from '#/db/schema'
 import { AppError } from '#/server/errors'
-import { randomLocalPart } from '#/server/mail/address'
+import { randomNameLocalPart } from '#/lib/name-prefix'
 import { escapeHtml, htmlToText } from '#/server/mail/content'
 import {
   createMailbox,
@@ -291,7 +291,10 @@ async function handleNew(
   const settings = await getSiteSettings()
   const localPart =
     prefix?.trim().toLowerCase() ||
-    randomLocalPart(Math.max(settings.tempPrefixMin, 8))
+    randomNameLocalPart({
+      minLength: Math.max(settings.tempPrefixMin, 8),
+      maxLength: settings.prefixMax,
+    })
 
   try {
     const box = await createMailbox(link.userId, {
