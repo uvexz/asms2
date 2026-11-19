@@ -69,6 +69,11 @@ function toView(row: {
   }
 }
 
+/** 临时邮箱未收到邮件而失效后不再出现在列表中；已保留的（retained）例外 */
+function isVisible(item: MailboxView) {
+  return !(item.kind === 'temp' && !item.retained && item.status === 'expired')
+}
+
 export async function listMailboxes(userId: string): Promise<MailboxView[]> {
   const rows = await db
     .select({
@@ -96,7 +101,7 @@ export async function listMailboxes(userId: string): Promise<MailboxView[]> {
     .where(and(eq(mailbox.userId, userId), ne(mailbox.status, 'deleted')))
     .orderBy(desc(mailbox.createdAt))
 
-  return rows.map(toView)
+  return rows.map(toView).filter(isVisible)
 }
 
 export async function getMailboxOrThrow(

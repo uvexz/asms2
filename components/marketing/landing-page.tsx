@@ -232,7 +232,7 @@ export function LandingPage({ site, signedIn }: LandingPageProps) {
               className="landing-enter text-display-3-medium tracking-[-0.02em] text-text-primary md:text-display-2-medium"
               style={{ animationDelay: '40ms' }}
             >
-              <span className="block">简单收发件，</span>
+              <span className="block">快速收发件，</span>
               <span className="block">你的简单邮箱专家。</span>
             </h1>
 

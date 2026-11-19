@@ -5,6 +5,7 @@ dist-ssr
 .cursor
 .vscode
 .workbuddy
+.commandcode
 .env
 .env*
 !.env.example
