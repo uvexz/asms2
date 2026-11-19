@@ -3,21 +3,24 @@ import { customAlphabet } from 'nanoid'
 
 import { db } from '#/db/client'
 import { dailyUsage } from '#/db/schema'
+import { safeTimeZone } from '#/lib/timezone'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
 
 const dateFormatters = new Map<string, Intl.DateTimeFormat>()
 
 function dateFormatterFor(timezone: string) {
-  let formatter = dateFormatters.get(timezone)
+  // 存量配置可能含非法时区；退化成 UTC 而不是抛 RangeError 打断发件/收件
+  const zone = safeTimeZone(timezone)
+  let formatter = dateFormatters.get(zone)
   if (!formatter) {
     formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
+      timeZone: zone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
     })
-    dateFormatters.set(timezone, formatter)
+    dateFormatters.set(zone, formatter)
   }
   return formatter
 }

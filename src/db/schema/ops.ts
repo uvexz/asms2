@@ -59,6 +59,8 @@ export const webhookEvent = sqliteTable(
       table.providerEventId,
     ),
     index('webhook_event_created_idx').on(table.receivedAt),
+    // 概览页按 status 统计失败事件，没有索引时每次进入都全表扫描
+    index('webhook_event_status_idx').on(table.status),
   ],
 )
 

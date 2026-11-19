@@ -84,7 +84,11 @@ export const account = sqliteTable(
       .default(sql`(unixepoch())`)
       .notNull(),
   },
-  (table) => [index('account_user_id_idx').on(table.userId)],
+  (table) => [
+    index('account_user_id_idx').on(table.userId),
+    // OAuth 回调按 (providerId, accountId) 反查账号
+    index('account_provider_account_idx').on(table.providerId, table.accountId),
+  ],
 )
 
 export const verification = sqliteTable(

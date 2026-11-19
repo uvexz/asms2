@@ -15,6 +15,9 @@ type RuntimeEvent = {
 
 const requestIds = new WeakMap<object, { id: string; startedAt: number }>()
 
+/** 只记录超过该阈值（毫秒）的成功请求，避免轮询把日志刷满 */
+const SLOW_REQUEST_MS = 1_000
+
 function requestIdFor(headers: Headers) {
   const incoming = headers.get('x-request-id')?.trim()
   return incoming && REQUEST_ID_RE.test(incoming) ? incoming : randomUUID()
@@ -52,17 +55,20 @@ export default definePlugin((nitroApp) => {
       // 响应头已发送时忽略，日志中的 reqId 仍可用于排查
     }
 
+    const durationMs = Math.round(performance.now() - state.startedAt)
     const line = JSON.stringify({
       type: 'request',
       reqId: state.id,
       method: event.req.method,
       path: asRuntimeEvent(event).url.pathname,
       status: res.status,
-      durationMs: Math.round(performance.now() - state.startedAt),
+      durationMs: durationMs,
     })
 
+    // 轮询请求（20s/60s）会随打开的标签线性放大日志量：
+    // 成功请求只记录慢请求，4xx/5xx 全量记录
     if (res.status >= 500) console.error(line)
     else if (res.status >= 400) console.warn(line)
-    else console.log(line)
+    else if (durationMs >= SLOW_REQUEST_MS) console.log(line)
   })
 })

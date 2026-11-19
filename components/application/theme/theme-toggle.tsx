@@ -8,10 +8,12 @@ import { RiMoonLine, RiSunLine } from "@remixicon/react";
 import { Switch as AriaSwitch } from "react-aria-components";
 import { SwitchTrack } from "@/components/base/switch/switch";
 import { cx } from "@/utils/cx";
+import { THEME_STORAGE_KEY } from "./theme-init";
+
+export { THEME_STORAGE_KEY };
 
 export type ThemeMode = "light" | "dark";
 
-export const THEME_STORAGE_KEY = "boardui:theme";
 export const THEME_CHANGE_EVENT = "boardui:theme-change";
 
 const THEME_TRANSITION_DURATION = 820;
@@ -89,10 +91,14 @@ function installThemeTransitionStyle(
 function storedTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";
   try {
-    return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === "dark") return "dark";
+    if (stored === "light") return "light";
   } catch {
-    return "light";
+    // Storage blocked: fall through to the system preference.
   }
+  // 没有手动选择过时跟随系统；与 <head> 的初始化脚本保持一致
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export function applyTheme(theme: ThemeMode, { persist = true }: { persist?: boolean } = {}) {
@@ -222,7 +228,7 @@ export interface ThemeToggleProps {
   transitionDuration?: number;
 }
 
-/** Manual light/dark control. It never reads the operating-system theme. */
+/** Manual light/dark control. Follows the system theme until the user picks one. */
 export function ThemeToggle({
   collapsed = false,
   appearance = "sidebar",

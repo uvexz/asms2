@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ComponentType } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   RiAddLine,
@@ -28,6 +28,7 @@ import { Spinner } from '@/components/base/spinner/spinner'
 import { Switch } from '@/components/base/switch/switch'
 import { toast } from '@/components/base/toast/toast'
 import { EmptyHint, PageSection } from '@/components/admin/ui'
+import { ErrorState } from '@/components/application/errors/error-state'
 import { unwrap } from '#/lib/api'
 import {
   adminCreateLoginMethodFn,
@@ -38,6 +39,7 @@ import {
 } from '#/server/fns/admin'
 
 export const Route = createFileRoute('/admin/auth')({
+  head: () => ({ meta: [{ title: '登录方式 · 管理后台' }] }),
   component: AdminAuth,
 })
 
@@ -113,6 +115,7 @@ function callbackPath(providerId: string) {
 
 function AdminAuth() {
   const queryClient = useQueryClient()
+  const router = useRouter()
   const query = useQuery({
     queryKey: ['admin', 'login-methods'],
     queryFn: async () => unwrap(await adminListLoginMethodsFn()),
@@ -134,6 +137,9 @@ function AdminAuth() {
     await queryClient.invalidateQueries({
       queryKey: ['admin', 'login-methods'],
     })
+    // 登录页/找回密码页的按钮来自独立查询与根 loader，两处都要刷新
+    await queryClient.invalidateQueries({ queryKey: ['public-login-config'] })
+    await router.invalidate()
   }
 
   async function toggle(method: LoginMethodRow, enabled: boolean) {
@@ -163,7 +169,7 @@ function AdminAuth() {
     const result = await adminDeleteLoginMethodFn({ data: { id: deleting.id } })
     if (!result.ok) {
       toast.error(result.error.message)
-      return
+      throw new Error(result.error.message)
     }
     toast.success('登录方式已删除')
     setDeleting(null)
@@ -191,7 +197,15 @@ function AdminAuth() {
           </div>
         ) : null}
 
-        {!query.isLoading && methods.length === 0 ? (
+        {query.isError ? (
+          <ErrorState
+            error={query.error}
+            title="登录方式加载失败"
+            onRetry={() => void query.refetch()}
+          />
+        ) : null}
+
+        {!query.isLoading && !query.isError && methods.length === 0 ? (
           <EmptyHint>还没有登录方式，先添加一种</EmptyHint>
         ) : null}
 
@@ -259,6 +273,7 @@ function AdminAuth() {
                     <Button
                       size="small"
                       variant="ghost"
+                      aria-label={`删除登录方式 ${method.displayName || meta.label}`}
                       onClick={() => setDeleting(method)}
                     >
                       <RiDeleteBinLine className="size-4" aria-hidden />
@@ -435,7 +450,7 @@ function AddMethodModal({
         <>
           <ModalHeader
             title="添加登录方式"
-            description="添加后立即生效，登录页会在 30–60 秒内更新"
+            description="添加后立即生效，登录页会同步刷新"
           />
           <ModalBody className="flex flex-col gap-3">
             <Select

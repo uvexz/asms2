@@ -36,8 +36,11 @@ let pragmasReady: Promise<void> | null = null
 
 /**
  * WAL 是数据库文件的持久属性，设置一次即可；busy timeout 由上面的 timeout
- * 选项应用到每个池连接。synchronous 是连接级参数，这里只覆盖首个连接，
- * 池中后续连接仍为默认值，但 WAL 已避免读写互斥。
+ * 选项应用到每个池连接。synchronous / foreign_keys 是连接级参数，这里只
+ * 覆盖首个连接，池中后续连接仍为默认值，但 WAL 已避免读写互斥。
+ *
+ * foreign_keys 显式打开：SQLite 默认关闭，关闭时 onDelete: 'cascade'
+ * 不会生效，删用户/邮箱会留下孤儿行。
  */
 export function ensurePragmas(): Promise<void> {
   if (!isLocal) return Promise.resolve()
@@ -46,6 +49,7 @@ export function ensurePragmas(): Promise<void> {
       try {
         await client.execute('PRAGMA journal_mode = WAL')
         await client.execute('PRAGMA synchronous = NORMAL')
+        await client.execute('PRAGMA foreign_keys = ON')
       } catch (error) {
         console.error('[db] 本地 SQLite 参数初始化失败:', error)
       }

@@ -2,11 +2,13 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 
 import { Spinner } from '@/components/base/spinner/spinner'
+import { ErrorState } from '@/components/application/errors/error-state'
 import { StatTile } from '@/components/admin/ui'
 import { adminOverviewFn } from '#/server/fns/admin'
 import { unwrap } from '#/lib/api'
 
 export const Route = createFileRoute('/admin/')({
+  head: () => ({ meta: [{ title: '概览 · 管理后台' }] }),
   component: AdminOverview,
 })
 
@@ -21,6 +23,16 @@ function AdminOverview() {
       <div className="flex justify-center py-16">
         <Spinner className="size-6" />
       </div>
+    )
+  }
+
+  if (query.isError) {
+    return (
+      <ErrorState
+        error={query.error}
+        title="概览加载失败"
+        onRetry={() => void query.refetch()}
+      />
     )
   }
 

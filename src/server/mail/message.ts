@@ -1,4 +1,16 @@
-import { and, desc, eq, like, lt, ne, or, sql } from 'drizzle-orm'
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  like,
+  lt,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm'
 
 import { db } from '#/db/client'
 import { attachment, mailbox, message, messageBody } from '#/db/schema'
@@ -67,10 +79,17 @@ export async function listMessages(
     eq(message.userId, userId),
     eq(message.folder, filters.folder),
     ne(mailbox.status, 'deleted'),
+    // 与侧栏的 isVisible 对齐：未保留且已过期的临时邮箱不再出现在列表里，
+    // 否则会出现「点开一封来自侧栏不存在邮箱的邮件」
+    or(
+      ne(mailbox.kind, 'temp'),
+      isNotNull(mailbox.retainedAt),
+      isNull(mailbox.expiresAt),
+      gt(mailbox.expiresAt, new Date()),
+    )!,
   ]
 
   if (filters.mailboxId) {
-    await getMailboxOrThrow(userId, filters.mailboxId, { allowExpired: true })
     conditions.push(eq(message.mailboxId, filters.mailboxId))
   }
 
@@ -114,7 +133,11 @@ export async function listMessages(
       createdAt: message.createdAt,
     })
     .from(message)
-    .innerJoin(mailbox, eq(mailbox.id, message.mailboxId))
+    // 归属校验并进 join，省掉列表请求前的一次 getMailboxOrThrow 往返
+    .innerJoin(
+      mailbox,
+      and(eq(mailbox.id, message.mailboxId), eq(mailbox.userId, userId))!,
+    )
     .where(and(...conditions))
     .orderBy(desc(message.receivedAt), desc(message.id))
     .limit(limit + 1)
@@ -153,6 +176,10 @@ export async function listMessages(
   })
 
   const last = items[items.length - 1]
+  // 空结果时补一次归属校验，区分「邮箱不存在」和「这个邮箱没有邮件」
+  if (filters.mailboxId && items.length === 0) {
+    await getMailboxOrThrow(userId, filters.mailboxId, { allowExpired: true })
+  }
   return {
     items,
     nextCursor: hasMore && last ? encodeCursor(last) : null,
@@ -242,42 +269,29 @@ export async function markRead(
   if (result.length === 0) throw new AppError('not_found', '邮件不存在', 404)
 }
 
-export async function toggleStar(
-  userId: string,
-  messageId: string,
-  starred: boolean,
-) {
-  const current = (
-    await db
-      .select({ isStarred: message.isStarred })
-      .from(message)
-      .where(
-        and(
-          eq(message.id, messageId),
-          eq(message.userId, userId),
-          visibleMailboxCondition(),
-        ),
-      )
-      .limit(1)
-  )[0]
-  if (!current) throw new AppError('not_found', '邮件不存在', 404)
-
-  const next = starred ?? !current.isStarred
-  await db
-    .update(message)
-    .set({ isStarred: next })
-    .where(and(eq(message.id, messageId), eq(message.userId, userId)))
-  return next
+export interface MessagePatch {
+  isRead?: boolean
+  isStarred?: boolean
+  folder?: MessageFolder
 }
 
-export async function moveMessage(
+/**
+ * 一次写操作覆盖已读/星标/移动三种变更，避免 RPC 里串行跑多条 UPDATE。
+ */
+export async function updateMessage(
   userId: string,
   messageId: string,
-  folder: MessageFolder,
+  patch: MessagePatch,
 ) {
+  const values: MessagePatch = {}
+  if (typeof patch.isRead === 'boolean') values.isRead = patch.isRead
+  if (typeof patch.isStarred === 'boolean') values.isStarred = patch.isStarred
+  if (patch.folder) values.folder = patch.folder
+  if (Object.keys(values).length === 0) return
+
   const result = await db
     .update(message)
-    .set({ folder })
+    .set(values)
     .where(
       and(
         eq(message.id, messageId),

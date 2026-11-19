@@ -143,6 +143,11 @@ export const message = sqliteTable(
       table.id,
     ),
     index('message_folder_received_idx').on(table.folder, table.receivedAt),
+    // 未读数聚合只扫未读行：partial index 比全量 (mailbox, folder, is_read) 更小
+    index('message_unread_idx')
+      .on(table.mailboxId, table.folder, table.isRead)
+      .where(sql`is_read = 0`),
+    index('message_direction_idx').on(table.direction),
     uniqueIndex('message_provider_uidx').on(
       table.providerConfigId,
       table.providerMessageId,

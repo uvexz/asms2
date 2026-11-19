@@ -46,9 +46,11 @@ export async function attempt<T>(fn: () => Promise<T>): Promise<Result<T>> {
         error: { code: error.code, message: error.message },
       }
     }
-    const message =
-      error instanceof Error ? error.message : '服务器内部错误，请稍后重试'
+    // 非预期错误可能含 SQL / 内部路径，只写日志，对外统一文案
     console.error('[asms2] unhandled error:', error)
-    return { ok: false, error: { code: 'internal', message } }
+    return {
+      ok: false,
+      error: { code: 'internal', message: '服务器内部错误，请稍后重试' },
+    }
   }
 }

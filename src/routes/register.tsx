@@ -3,26 +3,36 @@ import {
   createFileRoute,
   getRouteApi,
   useNavigate,
+  useRouter,
 } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { AuthCard } from '@/components/application/auth/auth-card'
 import { LoginMethodButtons } from '@/components/application/auth/method-buttons'
 import type { LoginSocialMethod } from '@/components/application/auth/method-buttons'
 import { toast } from '@/components/base/toast/toast'
 import { TemplateCopyProvider } from '@/components/foundations/template-copy/template-copy'
+import { ThemeCorner } from '@/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
+import { loginConfigQuery } from '#/lib/api'
 
 import { translateAuth } from './login'
 
 const rootApi = getRouteApi('__root__')
 
 export const Route = createFileRoute('/register')({
+  head: () => ({ meta: [{ title: '注册' }] }),
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData(loginConfigQuery),
   component: RegisterPage,
 })
 
 function RegisterPage() {
   const navigate = useNavigate()
-  const { site, auth } = rootApi.useLoaderData()
+  const router = useRouter()
+  const queryClient = useQueryClient()
+  const { site } = rootApi.useLoaderData()
+  const auth = Route.useLoaderData()
   const [loading, setLoading] = useState(false)
 
   const emailEnabled = auth.emailPassword.enabled
@@ -31,7 +41,7 @@ function RegisterPage() {
   // Passkey 只能绑定已有账号，注册页不算可用方式
   const hasAnyMethod = emailEnabled || social.length > 0
 
-  if (site && !site.registrationEnabled) {
+  if (!site.registrationEnabled) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-background-full px-4">
         <div className="max-w-sm rounded-3xl border border-border-button-default bg-background-primary-default p-8 text-center">
@@ -63,6 +73,8 @@ function RegisterPage() {
       toast.error(error.message ?? '注册失败，请稍后重试')
       return
     }
+    queryClient.clear()
+    await router.invalidate()
     if (verificationRequired && !result.user.emailVerified) {
       await navigate({ to: '/verify-email' })
       return
@@ -84,10 +96,11 @@ function RegisterPage() {
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-background-full px-4 py-10">
+      <ThemeCorner />
       <TemplateCopyProvider translate={translateAuth}>
         <AuthCard
           mode="signup"
-          title={`加入 ${site?.siteName ?? 'asms2'}`}
+          title={`加入 ${site.siteName ?? 'asms2'}`}
           description={
             emailEnabled
               ? '创建账号后即可生成长期与临时邮箱'
@@ -116,8 +129,7 @@ function RegisterPage() {
           confirmPassword
           className="w-full max-w-[420px]"
           footnote={
-            site?.footerText ??
-            `${site?.siteName ?? 'asms2'} · A Simple Mail Server`
+            site.footerText ?? `${site.siteName} · A Simple Mail Server`
           }
         />
       </TemplateCopyProvider>

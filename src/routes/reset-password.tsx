@@ -6,9 +6,11 @@ import { RiLockPasswordLine } from '@remixicon/react'
 import { Button } from '@/components/base/buttons/button'
 import { Input } from '@/components/base/input/input'
 import { toast } from '@/components/base/toast/toast'
+import { ThemeCorner } from '@/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
 
 export const Route = createFileRoute('/reset-password')({
+  head: () => ({ meta: [{ title: '重置密码' }] }),
   validateSearch: (
     search: Record<string, unknown>,
   ): { token?: string; error?: string } => ({
@@ -55,6 +57,7 @@ function ResetPasswordPage() {
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-background-full px-4 py-10">
+      <ThemeCorner />
       <div className="w-full max-w-[460px] rounded-3xl border border-border-button-default bg-background-primary-default p-6 shadow-xs sm:p-8">
         <RiLockPasswordLine
           className="size-8 text-foreground-icon-primary"

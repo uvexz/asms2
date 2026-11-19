@@ -21,12 +21,14 @@ import { toast } from '@/components/base/toast/toast'
 import {
   formatBytes,
   formatDateTime,
+  patchMailboxUnread,
   patchMessageCaches,
   removeMessageFromCaches,
   unwrap,
 } from '#/lib/api'
 import { getMessageFn, updateMessageFn } from '#/server/fns/mail'
 import type { MailboxView } from '#/server/mail/mailbox'
+import { ErrorState } from '@/components/application/errors/error-state'
 
 import { useCompose } from './compose-context'
 
@@ -59,6 +61,8 @@ export function MessageReader({
   const markUnreadId = useRef<string | null>(null)
 
   useEffect(() => {
+    // 换邮件必须重置：上一封放行过的远程图片不能延续到下一封（隐私）
+    setAllowImages(false)
     markUnreadId.current = null
   }, [messageId])
 
@@ -75,10 +79,11 @@ export function MessageReader({
     if (!message || message.isRead) return
     if (markUnreadId.current === message.id) return
     void updateMessageFn({ data: { id: message.id, isRead: true } }).then(
-      async (result) => {
+      (result) => {
         if (result.ok) {
           patchMessageCaches(queryClient, message.id, { isRead: true })
-          await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
+          // 局部调整未读数，避免整张邮箱列表（含未读聚合）重查
+          patchMailboxUnread(queryClient, message.mailboxId, -1)
         }
       },
     )
@@ -93,6 +98,18 @@ export function MessageReader({
     return (
       <div className="flex flex-1 items-center justify-center">
         <Spinner className="size-6" />
+      </div>
+    )
+  }
+
+  if (query.isError) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <ErrorState
+          error={query.error}
+          title="邮件加载失败"
+          onRetry={() => void query.refetch()}
+        />
       </div>
     )
   }
@@ -124,7 +141,10 @@ export function MessageReader({
 
     if (action === 'trash') {
       removeMessageFromCaches(queryClient, message.id)
-      await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
+      // 未读邮件被移走时同步扣减未读数
+      if (!message.isRead) {
+        patchMailboxUnread(queryClient, message.mailboxId, -1)
+      }
       toast.success('已移入回收站')
       void navigate({ to: '/mail', search: (prev) => ({ ...prev }) })
       return
@@ -133,7 +153,7 @@ export function MessageReader({
     if (action === 'unread') {
       markUnreadId.current = message.id
       patchMessageCaches(queryClient, message.id, { isRead: false })
-      await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
+      patchMailboxUnread(queryClient, message.mailboxId, 1)
       return
     }
 
@@ -154,22 +174,25 @@ export function MessageReader({
             void navigate({ to: '/mail', search: (prev) => ({ ...prev }) })
           }
         />
-        <IconButton
-          size="small"
-          icon={RiCornerUpLeftLine}
-          aria-label="回复"
-          disabled={!fromMailbox}
-          onClick={() => {
-            if (!fromMailbox) return
-            openCompose({
-              fromMailboxId: fromMailbox.id,
-              to: message.fromAddress,
-              subject: message.subject?.startsWith('Re:')
-                ? message.subject
-                : `Re: ${message.subject ?? ''}`,
-            })
-          }}
-        />
+        {/* 发件箱里的邮件没有「回复」语义：回复会把自己变成收件人 */}
+        {message.direction === 'inbound' ? (
+          <IconButton
+            size="small"
+            icon={RiCornerUpLeftLine}
+            aria-label="回复"
+            disabled={!fromMailbox}
+            onClick={() => {
+              if (!fromMailbox) return
+              openCompose({
+                fromMailboxId: fromMailbox.id,
+                to: message.fromAddress,
+                subject: message.subject?.startsWith('Re:')
+                  ? message.subject
+                  : `Re: ${message.subject ?? ''}`,
+              })
+            }}
+          />
+        ) : null}
         <IconButton
           size="small"
           icon={message.isStarred ? RiStarFill : RiStarLine}

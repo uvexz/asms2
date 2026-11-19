@@ -3,14 +3,18 @@ import {
   createFileRoute,
   getRouteApi,
   useNavigate,
+  useRouter,
 } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { AuthCard } from '@/components/application/auth/auth-card'
 import { LoginMethodButtons } from '@/components/application/auth/method-buttons'
 import type { LoginSocialMethod } from '@/components/application/auth/method-buttons'
 import { toast } from '@/components/base/toast/toast'
 import { TemplateCopyProvider } from '@/components/foundations/template-copy/template-copy'
+import { ThemeCorner } from '@/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
+import { loginConfigQuery } from '#/lib/api'
 
 export const DICT: Record<string, string> = {
   'Full name': '昵称',
@@ -37,6 +41,9 @@ export const translateAuth = (text: string) => DICT[text] ?? text
 const rootApi = getRouteApi('__root__')
 
 export const Route = createFileRoute('/login')({
+  head: () => ({ meta: [{ title: '登录' }] }),
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData(loginConfigQuery),
   component: LoginPage,
 })
 
@@ -51,7 +58,10 @@ function isConditionalUiSupported() {
 
 function LoginPage() {
   const navigate = useNavigate()
-  const { site, auth } = rootApi.useLoaderData()
+  const { site } = rootApi.useLoaderData()
+  const auth = Route.useLoaderData()
+  const queryClient = useQueryClient()
+  const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [passkeyBusy, setPasskeyBusy] = useState(false)
 
@@ -62,6 +72,9 @@ function LoginPage() {
   const hasAnyMethod = emailEnabled || social.length > 0 || passkeyEnabled
 
   async function goAfterLogin(emailVerified: boolean) {
+    // 清掉上一个会话残留的查询缓存，再让路由重新取 session
+    queryClient.clear()
+    await router.invalidate()
     if (verificationRequired && !emailVerified) {
       await navigate({ to: '/verify-email' })
       return
@@ -96,17 +109,14 @@ function LoginPage() {
 
   async function handlePasskey() {
     setPasskeyBusy(true)
-    const result = await authClient.signIn.passkey({
-      fetchOptions: {
-        onSuccess: () => {
-          void navigate({ to: '/mail', search: { folder: 'inbox' } })
-        },
-      },
-    })
+    const result = await authClient.signIn.passkey()
     setPasskeyBusy(false)
     if (result.error) {
       toast.error(result.error.message ?? 'Passkey 登录失败')
+      return
     }
+    // Passkey 是纯客户端登录，必须显式刷新 session 并清缓存
+    await goAfterLogin(Boolean(result.data.user.emailVerified))
   }
 
   // Conditional UI：浏览器在邮箱输入框上自动提示已保存的通行密钥
@@ -120,7 +130,12 @@ function LoginPage() {
           autoFill: true,
           fetchOptions: {
             onSuccess: () => {
-              void navigate({ to: '/mail', search: { folder: 'inbox' } })
+              queryClient.clear()
+              void router
+                .invalidate()
+                .then(() =>
+                  navigate({ to: '/mail', search: { folder: 'inbox' } }),
+                )
             },
           },
         })
@@ -129,14 +144,15 @@ function LoginPage() {
     return () => {
       cancelled = true
     }
-  }, [passkeyEnabled, navigate])
+  }, [passkeyEnabled, navigate, queryClient, router])
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-background-full px-4 py-10">
+      <ThemeCorner />
       <TemplateCopyProvider translate={translateAuth}>
         <AuthCard
           mode="signin"
-          title={site?.siteName ? `登录 ${site.siteName}` : '登录'}
+          title={site.siteName ? `登录 ${site.siteName}` : '登录'}
           description={
             emailEnabled
               ? '用邮箱和密码登录，或选择其他登录方式'
@@ -165,8 +181,7 @@ function LoginPage() {
           centered
           className="w-full max-w-[420px]"
           footnote={
-            site?.footerText ??
-            `${site?.siteName ?? 'asms2'} · A Simple Mail Server`
+            site.footerText ?? `${site.siteName} · A Simple Mail Server`
           }
         />
       </TemplateCopyProvider>

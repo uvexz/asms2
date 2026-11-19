@@ -1,10 +1,11 @@
-import { and, desc, eq, gt, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm'
 import { customAlphabet } from 'nanoid'
 
 import { db } from '#/db/client'
-import { domain, mailbox } from '#/db/schema'
+import { domain, mailbox, message } from '#/db/schema'
 import { AppError } from '#/server/errors'
 import { getSiteSettings } from '#/server/settings'
+import { MAILBOX_LIST_LIMIT } from '#/lib/limits'
 
 import { validateLocalPart } from './address'
 
@@ -74,6 +75,7 @@ function isVisible(item: MailboxView) {
   return !(item.kind === 'temp' && !item.retained && item.status === 'expired')
 }
 
+/** 侧栏邮箱列表：上限见 MAILBOX_LIST_LIMIT，未读数用一条 GROUP BY 聚合 */
 export async function listMailboxes(userId: string): Promise<MailboxView[]> {
   const rows = await db
     .select({
@@ -89,19 +91,41 @@ export async function listMailboxes(userId: string): Promise<MailboxView[]> {
       retainedAt: mailbox.retainedAt,
       lastReceivedAt: mailbox.lastReceivedAt,
       createdAt: mailbox.createdAt,
-      unread: sql<number>`(
-        select count(*) from message m
-        where m.mailbox_id = ${mailbox.id}
-          and m.folder = 'inbox'
-          and m.is_read = 0
-      )`,
     })
     .from(mailbox)
     .leftJoin(domain, eq(domain.id, mailbox.domainId))
     .where(and(eq(mailbox.userId, userId), ne(mailbox.status, 'deleted')))
     .orderBy(desc(mailbox.createdAt))
+    .limit(MAILBOX_LIST_LIMIT)
 
-  return rows.map(toView).filter(isVisible)
+  if (rows.length === 0) return []
+
+  // 未读数用一条 GROUP BY 聚合，避免每个邮箱各跑一次相关子查询
+  const unreadRows = await db
+    .select({
+      mailboxId: message.mailboxId,
+      count: sql<number>`count(*)`,
+    })
+    .from(message)
+    .where(
+      and(
+        inArray(
+          message.mailboxId,
+          rows.map((row) => row.id),
+        ),
+        eq(message.folder, 'inbox'),
+        eq(message.isRead, false),
+      ),
+    )
+    .groupBy(message.mailboxId)
+
+  const unreadByMailbox = new Map(
+    unreadRows.map((row) => [row.mailboxId, Number(row.count)]),
+  )
+
+  return rows
+    .map((row) => toView({ ...row, unread: unreadByMailbox.get(row.id) ?? 0 }))
+    .filter(isVisible)
 }
 
 export async function getMailboxOrThrow(
@@ -135,10 +159,7 @@ export async function getMailboxOrThrow(
   return row
 }
 
-async function resolveDomain(
-  kind: MailboxKind,
-  domainId: string | undefined,
-) {
+async function resolveDomain(kind: MailboxKind, domainId: string | undefined) {
   const conditions = [
     eq(domain.status, 'verified'),
     eq(domain.receivingEnabled, true),
@@ -153,9 +174,7 @@ async function resolveDomain(
     .from(domain)
     .where(and(...conditions))
     .orderBy(
-      desc(
-        kind === 'temp' ? domain.isDefaultTemp : domain.isDefaultPermanent,
-      ),
+      desc(kind === 'temp' ? domain.isDefaultTemp : domain.isDefaultPermanent),
       desc(domain.createdAt),
     )
     .limit(1)
@@ -329,10 +348,7 @@ export async function updateMailboxProfile(
  * 临时邮箱在考察期内收到了邮件：永久保留。
  * 置空 expiresAt 让清理任务不再扫描它，retainedAt 作为「已激活」的标记。
  */
-export async function retainTempMailbox(
-  mailboxId: string,
-  receivedAt: Date,
-) {
+export async function retainTempMailbox(mailboxId: string, receivedAt: Date) {
   const now = new Date()
   await db
     .update(mailbox)
@@ -364,9 +380,7 @@ export async function listSelectableDomains(kind: MailboxKind) {
       ),
     )
     .orderBy(
-      desc(
-        kind === 'temp' ? domain.isDefaultTemp : domain.isDefaultPermanent,
-      ),
+      desc(kind === 'temp' ? domain.isDefaultTemp : domain.isDefaultPermanent),
     )
   return rows
 }

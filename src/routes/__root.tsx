@@ -8,11 +8,10 @@ import { TanStackDevtools } from '@tanstack/react-devtools'
 
 import { DirectionProvider } from '@/components/foundations/direction/direction'
 import { Toaster } from '@/components/base/toast/toast'
-import {
-  getPublicLoginConfigFn,
-  getPublicSiteFn,
-  getSessionFn,
-} from '#/server/fns/site'
+import { RouteErrorState } from '@/components/application/errors/error-state'
+import { THEME_INIT_SCRIPT } from '@/components/application/theme/theme-init'
+import { getPublicSiteFn } from '#/server/fns/site'
+import { sessionQuery } from '#/lib/api'
 
 import TanStackQueryDevtools from '../integrations/tanstack-query/devtools'
 
@@ -42,27 +41,18 @@ const DEFAULT_ICON_LINKS = [
 ]
 
 export const Route = createRootRouteWithContext<MyRouterContext>()({
-  beforeLoad: async () => {
-    const session = await getSessionFn().catch(() => null)
+  beforeLoad: async ({ context }) => {
+    // 每次导航都会跑 beforeLoad（含 Link 预取）；走 query 缓存后 30s 内不再发 RPC
+    const session = await context.queryClient.ensureQueryData(sessionQuery)
     return { session }
   },
   loader: async () => {
-    const [site, auth] = await Promise.all([
-      getPublicSiteFn().catch(() => null),
-      getPublicLoginConfigFn().catch(() => ({
-        emailPassword: {
-          enabled: false,
-          verificationRequired: false,
-          canSend: false,
-        },
-        social: [],
-        passkey: { enabled: false },
-      })),
-    ])
-    return { site, auth }
+    // 站点信息直接读，失败就让错误边界暴露出来，不再静默降级成默认站点
+    const site = await getPublicSiteFn()
+    return { site }
   },
   head: ({ loaderData }) => {
-    const faviconUrl = loaderData?.site?.faviconUrl
+    const faviconUrl = loaderData?.site.faviconUrl
     return {
       meta: [
         { charSet: 'utf-8' },
@@ -71,11 +61,13 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
           content: 'width=device-width, initial-scale=1',
         },
         {
-          title: loaderData?.site?.siteName ?? 'asms2',
+          title: loaderData ? loaderData.site.siteName : 'asms2',
         },
         {
           name: 'description',
-          content: loaderData?.site?.siteDescription ?? 'A Simple Mail Server',
+          content: loaderData
+            ? loaderData.site.siteDescription
+            : 'A Simple Mail Server',
         },
       ],
       links: [
@@ -92,6 +84,7 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
       ],
     }
   },
+  errorComponent: RouteErrorState,
   shellComponent: RootDocument,
 })
 
@@ -99,6 +92,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
       <head>
+        {/* 阻塞式初始化：hydration 前确定明暗，避免暗色用户看到白屏闪烁 */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="bg-background-full text-text-primary antialiased">

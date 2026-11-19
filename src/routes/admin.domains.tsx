@@ -1,16 +1,28 @@
 import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { RiAddLine, RiCheckLine, RiDeleteBinLine, RiRefreshLine } from '@remixicon/react'
+import {
+  RiAddLine,
+  RiCheckLine,
+  RiDeleteBinLine,
+  RiRefreshLine,
+} from '@remixicon/react'
 
 import { Button } from '@/components/base/buttons/button'
 import { Chip } from '@/components/base/badges/chip'
 import { Input } from '@/components/base/input/input'
-import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/base/modal/modal'
+import {
+  AlertDialog,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+} from '@/components/base/modal/modal'
 import { Select, SelectItem } from '@/components/base/select/select'
 import { Switch } from '@/components/base/switch/switch'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { toast } from '@/components/base/toast/toast'
+import { ErrorState } from '@/components/application/errors/error-state'
 import { EmptyHint, PageSection } from '@/components/admin/ui'
 import {
   adminCreateDomainFn,
@@ -23,6 +35,7 @@ import {
 import { unwrap } from '#/lib/api'
 
 export const Route = createFileRoute('/admin/domains')({
+  head: () => ({ meta: [{ title: '域名 · 管理后台' }] }),
   component: AdminDomains,
 })
 
@@ -33,10 +46,32 @@ const STATUS_LABEL: Record<string, string> = {
   disabled: '已停用',
 }
 
+interface DnsRecordView {
+  type: string
+  name: string
+  value: string
+  priority?: number
+}
+
+/** 历史数据里的 JSON 可能损坏，不能让整个域名页跟着崩溃 */
+function parseDnsRecords(json: string | null): DnsRecordView[] {
+  if (!json) return []
+  try {
+    const parsed: unknown = JSON.parse(json)
+    return Array.isArray(parsed) ? (parsed as DnsRecordView[]) : []
+  } catch {
+    return []
+  }
+}
+
 function AdminDomains() {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<{
+    id: string
+    hostname: string
+  } | null>(null)
 
   const domains = useQuery({
     queryKey: ['admin', 'domains'],
@@ -59,7 +94,9 @@ function AdminDomains() {
       toast.error(result.error.message)
       return
     }
-    toast.success(`验证状态：${STATUS_LABEL[result.data.status] ?? result.data.status}`)
+    toast.success(
+      `验证状态：${STATUS_LABEL[result.data.status] ?? result.data.status}`,
+    )
     await refresh()
   }
 
@@ -67,18 +104,20 @@ function AdminDomains() {
     const result = await adminUpdateDomainFn({ data: { id, ...patch } })
     if (!result.ok) {
       toast.error(result.error.message)
-      return
+      throw new Error(result.error.message)
     }
     await refresh()
   }
 
-  async function remove(id: string) {
-    const result = await adminDeleteDomainFn({ data: { id } })
+  async function remove() {
+    if (!deleting) return
+    const result = await adminDeleteDomainFn({ data: { id: deleting.id } })
     if (!result.ok) {
       toast.error(result.error.message)
-      return
+      throw new Error(result.error.message)
     }
     toast.success('域名已删除')
+    setDeleting(null)
     await refresh()
   }
 
@@ -99,21 +138,23 @@ function AdminDomains() {
           </div>
         ) : null}
 
-        {!domains.isLoading && (domains.data ?? []).length === 0 ? (
+        {domains.isError ? (
+          <ErrorState
+            error={domains.error}
+            title="域名列表加载失败"
+            onRetry={() => void domains.refetch()}
+          />
+        ) : null}
+
+        {!domains.isLoading &&
+        !domains.isError &&
+        (domains.data ?? []).length === 0 ? (
           <EmptyHint>还没有域名，先添加一个用于收发的域名</EmptyHint>
         ) : null}
 
         <div className="flex flex-col gap-3">
           {(domains.data ?? []).map((item) => {
-            const records = item.dnsRecordsJson
-              ? (JSON.parse(item.dnsRecordsJson) as {
-                  record?: string
-                  type: string
-                  name: string
-                  value: string
-                  priority?: number
-                }[])
-              : []
+            const records = parseDnsRecords(item.dnsRecordsJson)
             return (
               <div
                 key={item.id}
@@ -136,7 +177,9 @@ function AdminDomains() {
                       {STATUS_LABEL[item.status] ?? item.status}
                     </Chip>
                     <Chip color="gray">{item.providerLabel}</Chip>
-                    <Chip color={item.allowPermanentCreate ? 'blue' : 'neutral'}>
+                    <Chip
+                      color={item.allowPermanentCreate ? 'blue' : 'neutral'}
+                    >
                       {item.allowPermanentCreate ? '可建长期' : '长期已关'}
                     </Chip>
                     <Chip color={item.allowTempCreate ? 'cyan' : 'neutral'}>
@@ -156,7 +199,13 @@ function AdminDomains() {
                     <Button
                       size="small"
                       variant="ghost"
-                      onClick={() => void remove(item.id)}
+                      aria-label={`删除域名 ${item.hostname}`}
+                      onClick={() =>
+                        setDeleting({
+                          id: item.id,
+                          hostname: item.hostname,
+                        })
+                      }
                     >
                       <RiDeleteBinLine className="size-4" aria-hidden />
                     </Button>
@@ -168,42 +217,42 @@ function AdminDomains() {
                     label="允许新建长期邮箱"
                     value={item.allowPermanentCreate}
                     onChange={(value) =>
-                      void update(item.id, { allowPermanentCreate: value })
+                      update(item.id, { allowPermanentCreate: value })
                     }
                   />
                   <ToggleCell
                     label="允许新建临时邮箱"
                     value={item.allowTempCreate}
                     onChange={(value) =>
-                      void update(item.id, { allowTempCreate: value })
+                      update(item.id, { allowTempCreate: value })
                     }
                   />
                   <ToggleCell
                     label="接收邮件"
                     value={item.receivingEnabled}
                     onChange={(value) =>
-                      void update(item.id, { receivingEnabled: value })
+                      update(item.id, { receivingEnabled: value })
                     }
                   />
                   <ToggleCell
                     label="发送邮件"
                     value={item.sendingEnabled}
                     onChange={(value) =>
-                      void update(item.id, { sendingEnabled: value })
+                      update(item.id, { sendingEnabled: value })
                     }
                   />
                   <ToggleCell
                     label="默认长期域"
                     value={item.isDefaultPermanent}
                     onChange={(value) =>
-                      void update(item.id, { isDefaultPermanent: value })
+                      update(item.id, { isDefaultPermanent: value })
                     }
                   />
                   <ToggleCell
                     label="默认临时域"
                     value={item.isDefaultTemp}
                     onChange={(value) =>
-                      void update(item.id, { isDefaultTemp: value })
+                      update(item.id, { isDefaultTemp: value })
                     }
                   />
                 </div>
@@ -217,21 +266,36 @@ function AdminDomains() {
                       <table className="w-full min-w-[520px] text-start text-caption-1-regular">
                         <thead className="text-text-tertiary">
                           <tr>
-                            <th className="py-1.5 pe-3 text-start font-medium">类型</th>
-                            <th className="py-1.5 pe-3 text-start font-medium">主机</th>
-                            <th className="py-1.5 pe-3 text-start font-medium">值</th>
-                            <th className="py-1.5 text-start font-medium">优先级</th>
+                            <th className="py-1.5 pe-3 text-start font-medium">
+                              类型
+                            </th>
+                            <th className="py-1.5 pe-3 text-start font-medium">
+                              主机
+                            </th>
+                            <th className="py-1.5 pe-3 text-start font-medium">
+                              值
+                            </th>
+                            <th className="py-1.5 text-start font-medium">
+                              优先级
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="text-text-secondary">
                           {records.map((record, index) => (
-                            <tr key={index} className="border-t border-separator-border">
+                            <tr
+                              key={index}
+                              className="border-t border-separator-border"
+                            >
                               <td className="py-1.5 pe-3">{record.type}</td>
-                              <td className="py-1.5 pe-3 font-mono">{record.name}</td>
+                              <td className="py-1.5 pe-3 font-mono">
+                                {record.name}
+                              </td>
                               <td className="max-w-[280px] truncate py-1.5 pe-3 font-mono">
                                 {record.value}
                               </td>
-                              <td className="py-1.5">{record.priority ?? '—'}</td>
+                              <td className="py-1.5">
+                                {record.priority ?? '—'}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -251,6 +315,23 @@ function AdminDomains() {
         providers={providers.data ?? []}
         onCreated={() => void refresh()}
       />
+
+      <AlertDialog
+        isOpen={Boolean(deleting)}
+        onOpenChange={(next) => {
+          if (!next) setDeleting(null)
+        }}
+        title="删除域名"
+        description={
+          deleting
+            ? `确定删除「${deleting.hostname}」吗？域名下仍有邮箱时会被拒绝。`
+            : ''
+        }
+        confirmLabel="删除"
+        cancelLabel="取消"
+        pendingLabel="删除中…"
+        onConfirm={remove}
+      />
     </div>
   )
 }
@@ -262,12 +343,29 @@ function ToggleCell({
 }: {
   label: string
   value: boolean
-  onChange: (value: boolean) => void
+  onChange: (value: boolean) => void | Promise<void>
 }) {
+  // Turso 往返期间锁住开关，避免用户重复点击后状态来回跳
+  const [pending, setPending] = useState(false)
   return (
     <label className="flex items-center justify-between gap-2 rounded-xl bg-background-secondary-default px-3 py-2">
-      <span className="text-caption-1-regular text-text-secondary">{label}</span>
-      <Switch isSelected={value} onChange={onChange} />
+      <span className="text-caption-1-regular text-text-secondary">
+        {label}
+      </span>
+      <Switch
+        isSelected={value}
+        isDisabled={pending}
+        onChange={async (next) => {
+          setPending(true)
+          try {
+            await onChange(next)
+          } catch {
+            // 失败提示已经由调用方 toast 出来
+          } finally {
+            setPending(false)
+          }
+        }}
+      />
     </label>
   )
 }
@@ -363,14 +461,19 @@ function AddDomainModal({
               />
             </div>
             <p className="text-caption-1-regular text-text-tertiary">
-              这两个开关只控制「新建」，不影响域名下已有邮箱的收发；创建后会自动调用服务商 API 生成 DNS 记录，到 DNS 服务商添加记录后回来点「验证」。
+              这两个开关只控制「新建」，不影响域名下已有邮箱的收发；创建后会自动调用服务商
+              API 生成 DNS 记录，到 DNS 服务商添加记录后回来点「验证」。
             </p>
           </ModalBody>
           <ModalFooter>
             <Button variant="secondary" onClick={renderProps.close}>
               取消
             </Button>
-            <Button leadingIcon={RiCheckLine} onClick={submit} disabled={loading}>
+            <Button
+              leadingIcon={RiCheckLine}
+              onClick={submit}
+              disabled={loading}
+            >
               {loading ? '创建中…' : '创建'}
             </Button>
           </ModalFooter>

@@ -10,21 +10,7 @@ export const getPublicSiteFn = createServerFn({ method: 'GET' }).handler(
 
 export const getPublicLoginConfigFn = createServerFn({
   method: 'GET',
-}).handler(async () => {
-  try {
-    return await getPublicLoginConfig()
-  } catch {
-    return {
-      emailPassword: {
-        enabled: false,
-        verificationRequired: false,
-        canSend: false,
-      },
-      social: [],
-      passkey: { enabled: false },
-    }
-  }
-})
+}).handler(async () => getPublicLoginConfig())
 
 export const getSessionFn = createServerFn({ method: 'GET' }).handler(
   async () => {

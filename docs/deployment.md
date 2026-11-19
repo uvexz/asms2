@@ -98,6 +98,7 @@ turso db dump <db-name> > backup-$(date +%F).sql
 ## 6. 观测与排障
 
 - 每个非静态请求输出一行 JSON：`type=request`、`reqId`、`method`、`path`、`status`、`durationMs`；4xx 用 `console.warn`，5xx 用 `console.error`。
+- 成功请求只在耗时 ≥1s 时记录，避免 20s/60s 轮询随打开的标签线性放大日志量；慢请求阈值定义在 `src/server/plugins/request-timing.ts`。
 - 响应头会返回 `x-request-id`（客户端传入合法值时会复用）；`/assets/**`、Vite 模块请求及常见静态文件扩展名不记录，避免日志噪音。
 - 重点指标：收件入库延迟、Webhook 失败率、发件成功率、配额拒绝次数、临时邮箱存量。
 - `webhook_event` 表即死信队列：管理后台「日志 → Webhook」可看失败原因，修复后可重放。
@@ -113,6 +114,14 @@ turso db dump <db-name> > backup-$(date +%F).sql
 | 登录后立刻掉线   | `BETTER_AUTH_URL` 与访问域名是否一致；Cookie 是否被代理丢弃                                                             |
 | 第三方登录报错   | 回调地址是否为 `{BETTER_AUTH_URL}/api/auth/callback/{provider}`；保存后是否等足 30–60s                                  |
 | Passkey 无法使用 | `BETTER_AUTH_URL` 必须是 `https://` 正式域名（本机 localhost 除外），且与浏览器访问地址完全一致                         |
+
+### 缓存与多实例
+
+- 站点配置（10s）、公开登录方式（60s）、Telegram Bot 配置（10s）、Auth 实例（30s 版本检查）都是**进程内缓存**，多实例 / Serverless 下不共享；写操作只失效当前进程，其它实例最多滞后一个 TTL。
+- `/mail`、`/admin`、`/settings`、认证页的 SSR HTML 由 `vite.config.ts` 的 `routeRules` 显式返回 `Cache-Control: private, no-store`，可直接放在 CDN 后面而不担心串号。
+- `/assets/*` 是带 hash 的构建产物，但应用服务器不写缓存头；请在 Nginx / CDN 层补 `Cache-Control: public, max-age=31536000, immutable`。
+- server fn 与 `/api/v1/*` 默认不带缓存头，保持私有数据不被中间层缓存；`/site.webmanifest` 为 `max-age=300`。
+- `/mail` 的首屏数据在路由 loader 里预取并随 SSR 脱水；排查"首屏只有骨架"时先确认服务端没有在 loader 阶段抛错（错误会走路由错误边界）。
 
 ## 7. 上线检查清单
 

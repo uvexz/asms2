@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { RiSaveLine, RiSearchLine } from '@remixicon/react'
@@ -10,13 +10,17 @@ import { Select, SelectItem } from '@/components/base/select/select'
 import { Switch } from '@/components/base/switch/switch'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { toast } from '@/components/base/toast/toast'
+import { ErrorState } from '@/components/application/errors/error-state'
 import { PageSection } from '@/components/admin/ui'
 import { adminListUsersFn, adminUpdateUserFn } from '#/server/fns/admin'
 import { unwrap } from '#/lib/api'
 
 export const Route = createFileRoute('/admin/users')({
+  head: () => ({ meta: [{ title: '用户 · 管理后台' }] }),
   component: AdminUsers,
 })
+
+const PAGE_SIZE = 50
 
 interface UserRow {
   id: string
@@ -34,16 +38,28 @@ function AdminUsers() {
   const queryClient = useQueryClient()
   const [q, setQ] = useState('')
   const [search, setSearch] = useState('')
+  const [offset, setOffset] = useState(0)
 
   const query = useQuery({
-    queryKey: ['admin', 'users', search],
+    queryKey: ['admin', 'users', search, offset],
     queryFn: async () =>
-      unwrap(await adminListUsersFn({ data: { q: search || undefined } })),
+      unwrap(
+        await adminListUsersFn({
+          data: { q: search || undefined, limit: PAGE_SIZE, offset },
+        }),
+      ),
   })
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ['admin', 'users'] })
   }
+
+  function submitSearch() {
+    setOffset(0)
+    setSearch(q)
+  }
+
+  const rows = query.data?.rows ?? []
 
   return (
     <div className="flex flex-col gap-5">
@@ -59,11 +75,7 @@ function AdminUsers() {
               value={q}
               onChange={setQ}
             />
-            <Button
-              variant="secondary"
-              size="small"
-              onClick={() => setSearch(q)}
-            >
+            <Button variant="secondary" size="small" onClick={submitSearch}>
               搜索
             </Button>
           </div>
@@ -75,11 +87,51 @@ function AdminUsers() {
           </div>
         ) : null}
 
+        {query.isError ? (
+          <ErrorState
+            error={query.error}
+            title="用户列表加载失败"
+            onRetry={() => void query.refetch()}
+          />
+        ) : null}
+
+        {!query.isLoading && !query.isError && rows.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-border-button-default p-4 text-center text-caption-1-regular text-text-tertiary">
+            {search ? '没有匹配的用户' : '还没有用户'}
+          </p>
+        ) : null}
+
         <div className="flex flex-col gap-3">
-          {(query.data ?? []).map((row: UserRow) => (
+          {rows.map((row: UserRow) => (
             <UserCard key={row.id} row={row} onSaved={() => void refresh()} />
           ))}
         </div>
+
+        {rows.length > 0 ? (
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <span className="text-caption-1-regular text-text-tertiary">
+              第 {offset + 1}–{offset + rows.length} 位
+            </span>
+            <div className="flex gap-2">
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={offset === 0}
+                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+              >
+                上一页
+              </Button>
+              <Button
+                size="small"
+                variant="secondary"
+                disabled={!query.data?.hasMore}
+                onClick={() => setOffset(offset + PAGE_SIZE)}
+              >
+                下一页
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </PageSection>
     </div>
   )
@@ -95,6 +147,14 @@ function UserCard({ row, onSaved }: { row: UserRow; onSaved: () => void }) {
     row.sendLimit === null ? '' : String(row.sendLimit),
   )
   const [saving, setSaving] = useState(false)
+
+  // 查询刷新后表单要跟着同步，否则会一直显示挂载时的旧值
+  useEffect(() => {
+    setRole(row.role === 'admin' ? 'admin' : 'user')
+    setBanned(Boolean(row.banned))
+    setMailboxLimit(row.mailboxLimit === null ? '' : String(row.mailboxLimit))
+    setSendLimit(row.sendLimit === null ? '' : String(row.sendLimit))
+  }, [row.id, row.role, row.banned, row.mailboxLimit, row.sendLimit])
 
   async function save() {
     setSaving(true)

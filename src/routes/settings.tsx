@@ -1,11 +1,6 @@
 import { useEffect, useState } from 'react'
-import {
-  createFileRoute,
-  getRouteApi,
-  redirect,
-  useNavigate,
-} from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   RiArrowLeftLine,
   RiDeleteBinLine,
@@ -21,21 +16,22 @@ import { Button } from '@/components/base/buttons/button'
 import { Chip } from '@/components/base/badges/chip'
 import { Divider } from '@/components/base/divider/divider'
 import { Input } from '@/components/base/input/input'
+import { AlertDialog } from '@/components/base/modal/modal'
 import { Select, SelectItem } from '@/components/base/select/select'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { Switch } from '@/components/base/switch/switch'
 import { toast } from '@/components/base/toast/toast'
+import { ErrorState } from '@/components/application/errors/error-state'
+import { ThemeToggle } from '@/components/application/theme/theme-toggle'
 import { PageSection, KeyValue } from '@/components/admin/ui'
 import { authClient } from '#/lib/auth-client'
-import { mailboxesQuery, quotaQuery, unwrap } from '#/lib/api'
+import { loginConfigQuery, mailboxesQuery, quotaQuery, unwrap } from '#/lib/api'
 import {
   createTelegramBindCodeFn,
   telegramStatusFn,
   unbindTelegramFn,
   updateTelegramNotifyFn,
 } from '#/server/fns/telegram'
-
-const rootApi = getRouteApi('__root__')
 
 export const Route = createFileRoute('/settings')({
   beforeLoad: ({ context }) => {
@@ -49,6 +45,7 @@ export const Route = createFileRoute('/settings')({
       throw redirect({ to: '/verify-email' })
     }
   },
+  head: () => ({ meta: [{ title: '个人设置' }] }),
   component: SettingsPage,
 })
 
@@ -61,8 +58,32 @@ interface ApiKeyRow {
   enabled?: boolean | null
 }
 
+interface ApiKeyClient {
+  list: () => Promise<{
+    data?: { apiKeys?: ApiKeyRow[] }
+    error?: { message?: string }
+  }>
+  create: (input: {
+    name: string
+    rateLimitEnabled?: boolean
+    rateLimitMax?: number
+    rateLimitTimeWindow?: number
+  }) => Promise<{
+    data?: { key?: string; id?: string }
+    error?: { message?: string }
+  }>
+  delete: (input: {
+    keyId: string
+  }) => Promise<{ error?: { message?: string } }>
+}
+
+function apiKeyClient() {
+  return (authClient as unknown as { apiKey: ApiKeyClient }).apiKey
+}
+
 function SettingsPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { session } = Route.useRouteContext()
 
   const mailboxes = useQuery(mailboxesQuery)
@@ -70,29 +91,25 @@ function SettingsPage() {
 
   const [name, setName] = useState(session?.name ?? '')
   const [saving, setSaving] = useState(false)
-  const [keys, setKeys] = useState<ApiKeyRow[]>([])
   const [keyName, setKeyName] = useState('')
   const [newKey, setNewKey] = useState<string | null>(null)
   const [keyLoading, setKeyLoading] = useState(false)
+  const [revoking, setRevoking] = useState<ApiKeyRow | null>(null)
 
   useEffect(() => {
     setName(session?.name ?? '')
   }, [session?.name])
 
-  useEffect(() => {
-    void (async () => {
-      const client = authClient as unknown as {
-        apiKey: {
-          list: () => Promise<{
-            data?: { apiKeys?: ApiKeyRow[] }
-            error?: { message?: string }
-          }>
-        }
+  const keysQuery = useQuery({
+    queryKey: ['api-keys'],
+    queryFn: async () => {
+      const result = await apiKeyClient().list()
+      if (result.error) {
+        throw new Error(result.error.message ?? '读取 API Key 失败')
       }
-      const result = await client.apiKey.list().catch(() => null)
-      if (result?.data?.apiKeys) setKeys(result.data.apiKeys)
-    })()
-  }, [])
+      return result.data?.apiKeys ?? []
+    },
+  })
 
   async function saveProfile() {
     setSaving(true)
@@ -107,21 +124,9 @@ function SettingsPage() {
 
   async function createKey() {
     setKeyLoading(true)
-    const client = authClient as unknown as {
-      apiKey: {
-        create: (input: {
-          name: string
-          rateLimitEnabled?: boolean
-          rateLimitMax?: number
-          rateLimitTimeWindow?: number
-        }) => Promise<{
-          data?: { key?: string; id?: string }
-          error?: { message?: string }
-        }>
-      }
-    }
-    const result = await client.apiKey.create({
-      name: keyName.trim() || 'default',
+    const label = keyName.trim() || 'default'
+    const result = await apiKeyClient().create({
+      name: label,
       rateLimitEnabled: true,
       rateLimitMax: 120,
       rateLimitTimeWindow: 60_000,
@@ -133,23 +138,31 @@ function SettingsPage() {
     }
     setNewKey(result.data.key)
     setKeyName('')
+    // 立即把新 Key 追加到列表，而不是等下一次整页刷新
+    queryClient.setQueryData<ApiKeyRow[]>(['api-keys'], (old) => [
+      {
+        id: result.data?.id ?? result.data!.key!,
+        name: label,
+        start: result.data!.key!.slice(0, 6),
+        createdAt: new Date(),
+        enabled: true,
+      },
+      ...(old ?? []),
+    ])
     toast.success('API Key 已创建，请立即保存')
   }
 
-  async function revokeKey(id: string) {
-    const client = authClient as unknown as {
-      apiKey: {
-        delete: (input: {
-          keyId: string
-        }) => Promise<{ error?: { message?: string } }>
-      }
-    }
-    const result = await client.apiKey.delete({ keyId: id })
+  async function revokeKey() {
+    if (!revoking) return
+    const result = await apiKeyClient().delete({ keyId: revoking.id })
     if (result.error) {
       toast.error(result.error.message ?? '删除失败')
-      return
+      throw new Error(result.error.message ?? '删除失败')
     }
-    setKeys((prev) => prev.filter((item) => item.id !== id))
+    queryClient.setQueryData<ApiKeyRow[]>(['api-keys'], (old) =>
+      (old ?? []).filter((item) => item.id !== revoking.id),
+    )
+    setRevoking(null)
     toast.success('已吊销')
   }
 
@@ -166,15 +179,18 @@ function SettingsPage() {
             {session?.email}
           </p>
         </div>
-        <Button
-          variant="secondary"
-          leadingIcon={RiArrowLeftLine}
-          onClick={() =>
-            void navigate({ to: '/mail', search: { folder: 'inbox' } })
-          }
-        >
-          返回邮箱
-        </Button>
+        <div className="flex items-center gap-2">
+          <ThemeToggle appearance="segmented" size="small" />
+          <Button
+            variant="secondary"
+            leadingIcon={RiArrowLeftLine}
+            onClick={() =>
+              void navigate({ to: '/mail', search: { folder: 'inbox' } })
+            }
+          >
+            返回邮箱
+          </Button>
+        </div>
       </div>
 
       <PageSection title="资料">
@@ -196,24 +212,36 @@ function SettingsPage() {
       </PageSection>
 
       <PageSection title="配额">
-        <div className="flex flex-col gap-1">
-          <KeyValue
-            label="长期邮箱"
-            value={`${permanent.length}${session?.mailboxLimit ? ` / ${session.mailboxLimit}` : ''}`}
+        {mailboxes.isError || quota.isError ? (
+          <ErrorState
+            compact
+            error={mailboxes.error ?? quota.error}
+            onRetry={() => {
+              void mailboxes.refetch()
+              void quota.refetch()
+            }}
+            className="py-4"
           />
-          <KeyValue
-            label="今日发件"
-            value={
-              quota.data
-                ? `${quota.data.sent} / ${quota.data.limit}（剩余 ${quota.data.remaining}）`
-                : '—'
-            }
-          />
-          <KeyValue
-            label="角色"
-            value={session?.role === 'admin' ? '管理员' : '普通用户'}
-          />
-        </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <KeyValue
+              label="长期邮箱"
+              value={`${permanent.length}${session?.mailboxLimit ? ` / ${session.mailboxLimit}` : ''}`}
+            />
+            <KeyValue
+              label="今日发件"
+              value={
+                quota.data
+                  ? `${quota.data.sent} / ${quota.data.limit}（剩余 ${quota.data.remaining}）`
+                  : '—'
+              }
+            />
+            <KeyValue
+              label="角色"
+              value={session?.role === 'admin' ? '管理员' : '普通用户'}
+            />
+          </div>
+        )}
       </PageSection>
 
       <SecuritySection />
@@ -254,12 +282,28 @@ function SettingsPage() {
         ) : null}
 
         <div className="mt-4 flex flex-col gap-2">
-          {keys.length === 0 ? (
+          {keysQuery.isLoading ? (
+            <div className="flex items-center gap-2 text-caption-1-regular text-text-tertiary">
+              <Spinner className="size-4" /> 加载 API Key…
+            </div>
+          ) : null}
+          {keysQuery.isError ? (
+            <ErrorState
+              compact
+              title="读取 API Key 失败"
+              error={keysQuery.error}
+              onRetry={() => void keysQuery.refetch()}
+              className="py-4"
+            />
+          ) : null}
+          {!keysQuery.isLoading &&
+          !keysQuery.isError &&
+          (keysQuery.data ?? []).length === 0 ? (
             <p className="text-caption-1-regular text-text-tertiary">
               还没有 API Key
             </p>
           ) : null}
-          {keys.map((key) => (
+          {(keysQuery.data ?? []).map((key) => (
             <div
               key={key.id}
               className="flex items-center justify-between gap-3 rounded-xl border border-border-button-default px-3 py-2"
@@ -273,20 +317,32 @@ function SettingsPage() {
               <Button
                 size="small"
                 variant="ghost"
-                onClick={() => void revokeKey(key.id)}
+                aria-label={`吊销 ${key.name || 'API Key'}`}
+                onClick={() => setRevoking(key)}
               >
                 <RiDeleteBinLine className="size-4" aria-hidden />
               </Button>
             </div>
           ))}
         </div>
-
-        {mailboxes.isLoading ? (
-          <div className="mt-3 flex items-center gap-2 text-caption-1-regular text-text-tertiary">
-            <Spinner className="size-4" /> 加载中…
-          </div>
-        ) : null}
       </PageSection>
+
+      <AlertDialog
+        isOpen={Boolean(revoking)}
+        onOpenChange={(open) => {
+          if (!open) setRevoking(null)
+        }}
+        title="吊销 API Key"
+        description={
+          revoking
+            ? `确定吊销「${revoking.name || '未命名'}」吗？使用该 Key 的脚本会立即失效。`
+            : ''
+        }
+        confirmLabel="吊销"
+        cancelLabel="取消"
+        pendingLabel="吊销中…"
+        onConfirm={revokeKey}
+      />
     </div>
   )
 }
@@ -316,6 +372,7 @@ function TelegramSection() {
     deepLink: string | null
   } | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [unbinding, setUnbinding] = useState<TelegramLinkView | null>(null)
 
   const data = status.data
 
@@ -356,9 +413,10 @@ function TelegramSection() {
     const result = await unbindTelegramFn({ data: { linkId: link.id } })
     if (!result.ok) {
       toast.error(result.error.message)
-      return
+      throw new Error(result.error.message)
     }
     toast.success('已解绑')
+    setUnbinding(null)
     await status.refetch()
   }
 
@@ -390,6 +448,16 @@ function TelegramSection() {
         <div className="flex items-center gap-2 text-caption-1-regular text-text-tertiary">
           <Spinner className="size-4" /> 加载中…
         </div>
+      ) : null}
+
+      {status.isError ? (
+        <ErrorState
+          compact
+          title="读取 Telegram 状态失败"
+          error={status.error}
+          onRetry={() => void status.refetch()}
+          className="py-4"
+        />
       ) : null}
 
       {data && !data.enabled ? (
@@ -501,7 +569,8 @@ function TelegramSection() {
                     <Button
                       size="small"
                       variant="ghost"
-                      onClick={() => void unbind(link)}
+                      aria-label={`解绑 ${link.chatLabel}`}
+                      onClick={() => setUnbinding(link)}
                     >
                       <RiDeleteBinLine className="size-4" aria-hidden />
                     </Button>
@@ -512,6 +581,23 @@ function TelegramSection() {
           )}
         </div>
       ) : null}
+
+      <AlertDialog
+        isOpen={Boolean(unbinding)}
+        onOpenChange={(open) => {
+          if (!open) setUnbinding(null)
+        }}
+        title="解绑 Telegram 会话"
+        description={
+          unbinding ? `确定不再向「${unbinding.chatLabel}」推送新邮件吗？` : ''
+        }
+        confirmLabel="解绑"
+        cancelLabel="取消"
+        pendingLabel="解绑中…"
+        onConfirm={async () => {
+          if (unbinding) await unbind(unbinding)
+        }}
+      />
     </PageSection>
   )
 }
@@ -525,10 +611,11 @@ interface PasskeyRow {
 }
 
 function SecuritySection() {
-  const { auth } = rootApi.useLoaderData()
+  const authQuery = useQuery(loginConfigQuery)
   const { session } = Route.useRouteContext()
-  const passkeyEnabled = auth.passkey.enabled
-  const verificationRequired = auth.emailPassword.verificationRequired
+  const passkeyEnabled = authQuery.data?.passkey.enabled ?? false
+  const verificationRequired =
+    authQuery.data?.emailPassword.verificationRequired ?? false
 
   const [passkeys, setPasskeys] = useState<PasskeyRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -536,6 +623,7 @@ function SecuritySection() {
   const [adding, setAdding] = useState(false)
   const [sending, setSending] = useState(false)
   const [supported, setSupported] = useState(true)
+  const [deleting, setDeleting] = useState<PasskeyRow | null>(null)
 
   useEffect(() => {
     setSupported(
@@ -572,13 +660,14 @@ function SecuritySection() {
     await loadPasskeys()
   }
 
-  async function removePasskey(id: string) {
-    const result = await authClient.passkey.deletePasskey({ id })
+  async function removePasskey(row: PasskeyRow) {
+    const result = await authClient.passkey.deletePasskey({ id: row.id })
     if (result.error) {
       toast.error(result.error.message ?? '删除失败')
-      return
+      throw new Error(result.error.message ?? '删除失败')
     }
-    setPasskeys((prev) => prev.filter((item) => item.id !== id))
+    setPasskeys((prev) => prev.filter((item) => item.id !== row.id))
+    setDeleting(null)
     toast.success('Passkey 已删除')
   }
 
@@ -691,7 +780,8 @@ function SecuritySection() {
                 <Button
                   size="small"
                   variant="ghost"
-                  onClick={() => void removePasskey(item.id)}
+                  aria-label={`删除 Passkey ${item.name || ''}`.trim()}
+                  onClick={() => setDeleting(item)}
                 >
                   <RiDeleteBinLine className="size-4" aria-hidden />
                 </Button>
@@ -700,6 +790,25 @@ function SecuritySection() {
           </div>
         </>
       )}
+
+      <AlertDialog
+        isOpen={Boolean(deleting)}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null)
+        }}
+        title="删除 Passkey"
+        description={
+          deleting
+            ? `确定删除「${deleting.name || 'Passkey'}」吗？之后将无法用它登录。`
+            : ''
+        }
+        confirmLabel="删除"
+        cancelLabel="取消"
+        pendingLabel="删除中…"
+        onConfirm={async () => {
+          if (deleting) await removePasskey(deleting)
+        }}
+      />
     </PageSection>
   )
 }

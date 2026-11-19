@@ -3,6 +3,7 @@ import { routeTree } from './routeTree.gen'
 
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query'
 
+import { ButtonLink } from '@/components/base/buttons/button'
 import { getContext } from './integrations/tanstack-query/root-provider'
 
 export function getRouter() {
@@ -20,12 +21,9 @@ export function getRouter() {
         <p className="text-body-regular text-text-secondary">
           链接可能已失效，或你没有访问权限。
         </p>
-        <a
-          href="/mail"
-          className="mt-2 rounded-lg bg-accent-600 px-4 py-2 text-body-medium text-white"
-        >
+        <ButtonLink href="/mail" className="mt-2">
           回到邮箱
-        </a>
+        </ButtonLink>
       </div>
     ),
   })

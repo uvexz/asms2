@@ -28,6 +28,7 @@ import { canSendSystemMail } from '#/server/mail/system'
 import { getProvider } from '#/server/providers'
 import type { DnsRecord } from '#/server/providers'
 import { bumpAuthConfigVersion, getSiteSettings } from '#/server/settings'
+import { isValidTimeZone } from '#/lib/timezone'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
 
@@ -120,7 +121,15 @@ const settingsPatchSchema = z.object({
   trashRetentionDays: z.number().int().min(1).max(365).optional(),
   orphanRetentionDays: z.number().int().min(1).max(365).optional(),
   deletedMailboxRetentionDays: z.number().int().min(0).max(3650).optional(),
-  timezone: z.string().max(60).optional(),
+  // 非法时区会让 usageDateFor 抛 RangeError，进而打挂发件/配额/收件
+  timezone: z
+    .string()
+    .max(60)
+    .refine(
+      (value) => isValidTimeZone(value),
+      '时区不合法，请填写 IANA 时区（如 Asia/Shanghai）',
+    )
+    .optional(),
 })
 
 export const adminUpdateSettingsFn = createServerFn({ method: 'POST' })
@@ -133,6 +142,8 @@ export const adminUpdateSettingsFn = createServerFn({ method: 'POST' })
         .update(siteSettings)
         .set({ ...data, updatedAt: new Date(), updatedBy: actor.id })
         .where(eq(siteSettings.id, 'default'))
+      // 站点配置参与登录页展示（邮箱验证开关），同步失效公开登录配置缓存
+      invalidatePublicLoginConfig()
       await audit(actor.id, 'site.update', 'site', 'default', data)
       return getSiteSettings(true)
     }),
@@ -653,6 +664,41 @@ export const adminCreateWebhookFn = createServerFn({ method: 'POST' })
     }),
   )
 
+export const adminUpdateWebhookFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) =>
+    z
+      .object({
+        id: z.string(),
+        label: z.string().min(1).max(60).optional(),
+        enabled: z.boolean().optional(),
+        signingSecret: z.string().min(8).optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }) =>
+    attempt(async () => {
+      const actor = await requireAdmin()
+      const { id, signingSecret, ...rest } = data
+      const values: {
+        label?: string
+        enabled?: boolean
+        signingSecretEnc?: string
+      } = {}
+      if (rest.label !== undefined) values.label = rest.label
+      if (rest.enabled !== undefined) values.enabled = rest.enabled
+      if (signingSecret) values.signingSecretEnc = encryptSecret(signingSecret)
+      if (Object.keys(values).length === 0) return { id }
+      await db
+        .update(webhookEndpoint)
+        .set(values)
+        .where(eq(webhookEndpoint.id, id))
+      await audit(actor.id, 'webhook.update', 'webhook', id, {
+        enabled: rest.enabled,
+      })
+      return { id }
+    }),
+  )
+
 export const adminDeleteWebhookFn = createServerFn({ method: 'POST' })
   .validator((data: unknown) => z.object({ id: z.string() }).parse(data))
   .handler(async ({ data }) =>
@@ -982,11 +1028,19 @@ export const adminSetEmailVerificationFn = createServerFn({ method: 'POST' })
 
 export const adminListUsersFn = createServerFn({ method: 'POST' })
   .validator((data: unknown) =>
-    z.object({ q: z.string().max(80).optional() }).parse(data),
+    z
+      .object({
+        q: z.string().max(80).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        offset: z.number().int().min(0).max(100_000).optional(),
+      })
+      .parse(data),
   )
   .handler(async ({ data }) =>
     attempt(async () => {
       await requireAdmin()
+      const limit = data.limit ?? 50
+      const offset = data.offset ?? 0
       const conditions = data.q
         ? sql`lower(${user.email}) like ${`%${data.q.toLowerCase()}%`}`
         : undefined
@@ -1009,13 +1063,18 @@ export const adminListUsersFn = createServerFn({ method: 'POST' })
         .from(user)
         .where(conditions)
         .orderBy(desc(user.createdAt))
-        .limit(100)
+        .limit(limit + 1)
+        .offset(offset)
 
-      return rows.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.getTime(),
-        mailboxCount: Number(row.mailboxCount ?? 0),
-      }))
+      const hasMore = rows.length > limit
+      return {
+        rows: (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
+          ...row,
+          createdAt: row.createdAt.getTime(),
+          mailboxCount: Number(row.mailboxCount ?? 0),
+        })),
+        hasMore,
+      }
     }),
   )
 
@@ -1068,10 +1127,18 @@ export const adminUpdateUserFn = createServerFn({ method: 'POST' })
 
 /* --------------------------------------------------------------------- logs */
 
-export const adminListAuditFn = createServerFn({ method: 'GET' }).handler(
-  async () =>
+const logQuerySchema = z.object({
+  limit: z.number().int().min(1).max(200).optional(),
+  offset: z.number().int().min(0).max(100_000).optional(),
+})
+
+export const adminListAuditFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) => logQuerySchema.parse(data ?? {}))
+  .handler(async ({ data }) =>
     attempt(async () => {
       await requireAdmin()
+      const limit = data.limit ?? 100
+      const offset = data.offset ?? 0
       const rows = await db
         .select({
           id: auditLog.id,
@@ -1084,41 +1151,56 @@ export const adminListAuditFn = createServerFn({ method: 'GET' }).handler(
         .from(auditLog)
         .leftJoin(user, eq(user.id, auditLog.actorUserId))
         .orderBy(desc(auditLog.createdAt))
-        .limit(100)
-      return rows.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.getTime(),
-      }))
+        .limit(limit + 1)
+        .offset(offset)
+      const hasMore = rows.length > limit
+      return {
+        rows: (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
+          ...row,
+          createdAt: row.createdAt.getTime(),
+        })),
+        hasMore,
+      }
     }),
-)
+  )
 
-export const adminListWebhookEventsFn = createServerFn({
-  method: 'GET',
-}).handler(async () =>
-  attempt(async () => {
-    await requireAdmin()
-    const rows = await db
-      .select({
-        id: webhookEvent.id,
-        type: webhookEvent.type,
-        status: webhookEvent.status,
-        error: webhookEvent.error,
-        receivedAt: webhookEvent.receivedAt,
-      })
-      .from(webhookEvent)
-      .orderBy(desc(webhookEvent.receivedAt))
-      .limit(100)
-    return rows.map((row) => ({
-      ...row,
-      receivedAt: row.receivedAt.getTime(),
-    }))
-  }),
-)
-
-export const adminListUnroutedFn = createServerFn({ method: 'GET' }).handler(
-  async () =>
+export const adminListWebhookEventsFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) => logQuerySchema.parse(data ?? {}))
+  .handler(async ({ data }) =>
     attempt(async () => {
       await requireAdmin()
+      const limit = data.limit ?? 100
+      const offset = data.offset ?? 0
+      const rows = await db
+        .select({
+          id: webhookEvent.id,
+          type: webhookEvent.type,
+          status: webhookEvent.status,
+          error: webhookEvent.error,
+          receivedAt: webhookEvent.receivedAt,
+        })
+        .from(webhookEvent)
+        .orderBy(desc(webhookEvent.receivedAt))
+        .limit(limit + 1)
+        .offset(offset)
+      const hasMore = rows.length > limit
+      return {
+        rows: (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
+          ...row,
+          receivedAt: row.receivedAt.getTime(),
+        })),
+        hasMore,
+      }
+    }),
+  )
+
+export const adminListUnroutedFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) => logQuerySchema.parse(data ?? {}))
+  .handler(async ({ data }) =>
+    attempt(async () => {
+      await requireAdmin()
+      const limit = data.limit ?? 50
+      const offset = data.offset ?? 0
       const rows = await db
         .select({
           id: unroutedMessage.id,
@@ -1129,10 +1211,15 @@ export const adminListUnroutedFn = createServerFn({ method: 'GET' }).handler(
         })
         .from(unroutedMessage)
         .orderBy(desc(unroutedMessage.createdAt))
-        .limit(50)
-      return rows.map((row) => ({
-        ...row,
-        createdAt: row.createdAt.getTime(),
-      }))
+        .limit(limit + 1)
+        .offset(offset)
+      const hasMore = rows.length > limit
+      return {
+        rows: (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
+          ...row,
+          createdAt: row.createdAt.getTime(),
+        })),
+        hasMore,
+      }
     }),
-)
+  )

@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   RiAddLine,
   RiDeleteBinLine,
+  RiEditLine,
   RiFileCopyLine,
   RiKey2Line,
   RiRefreshLine,
@@ -14,6 +15,7 @@ import { Chip } from '@/components/base/badges/chip'
 import { Checkbox } from '@/components/base/checkbox/checkbox'
 import { Input } from '@/components/base/input/input'
 import {
+  AlertDialog,
   Modal,
   ModalBody,
   ModalFooter,
@@ -24,6 +26,7 @@ import { Switch } from '@/components/base/switch/switch'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { toast } from '@/components/base/toast/toast'
 import { Divider } from '@/components/base/divider/divider'
+import { ErrorState } from '@/components/application/errors/error-state'
 import { EmptyHint, PageSection } from '@/components/admin/ui'
 import {
   adminCreateProviderFn,
@@ -35,12 +38,19 @@ import {
   adminListProvidersFn,
   adminListWebhooksFn,
   adminUpdateProviderFn,
+  adminUpdateWebhookFn,
 } from '#/server/fns/admin'
 import { unwrap } from '#/lib/api'
 
 export const Route = createFileRoute('/admin/providers')({
+  head: () => ({ meta: [{ title: '服务商 · 管理后台' }] }),
   component: AdminProviders,
 })
+
+type ProvidersResult = Awaited<ReturnType<typeof adminListProvidersFn>>
+type ProviderRow = Extract<ProvidersResult, { ok: true }>['data'][number]
+type WebhooksResult = Awaited<ReturnType<typeof adminListWebhooksFn>>
+type WebhookRow = Extract<WebhooksResult, { ok: true }>['data'][number]
 
 type DiscoveredDomain = {
   providerDomainId: string
@@ -77,6 +87,17 @@ function AdminProviders() {
   const [discovery, setDiscovery] = useState<DiscoveryState | null>(null)
   const [discoveringId, setDiscoveringId] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  const [pendingId, setPendingId] = useState<string | null>(null)
+  const [deletingProvider, setDeletingProvider] = useState<ProviderRow | null>(
+    null,
+  )
+  const [deletingWebhook, setDeletingWebhook] = useState<WebhookRow | null>(
+    null,
+  )
+  const [editingProvider, setEditingProvider] = useState<ProviderRow | null>(
+    null,
+  )
+  const [editingWebhook, setEditingWebhook] = useState<WebhookRow | null>(null)
 
   const providers = useQuery({
     queryKey: ['admin', 'providers'],
@@ -93,23 +114,67 @@ function AdminProviders() {
   }
 
   async function setDefault(id: string, value: boolean) {
+    setPendingId(id)
     const result = await adminUpdateProviderFn({
       data: { id, isDefaultForSend: value },
     })
+    setPendingId(null)
     if (!result.ok) {
       toast.error(result.error.message)
-      return
+      throw new Error(result.error.message)
     }
     await refresh()
   }
 
-  async function remove(id: string) {
-    const result = await adminDeleteProviderFn({ data: { id } })
+  async function toggleWebhook(item: WebhookRow, enabled: boolean) {
+    // 乐观更新：Turso 延迟下开关不会停在原位
+    queryClient.setQueryData<WebhookRow[]>(['admin', 'webhooks'], (old) =>
+      old
+        ? old.map((row) => (row.id === item.id ? { ...row, enabled } : row))
+        : old,
+    )
+    const result = await adminUpdateWebhookFn({
+      data: { id: item.id, enabled },
+    })
     if (!result.ok) {
       toast.error(result.error.message)
+      queryClient.setQueryData<WebhookRow[]>(['admin', 'webhooks'], (old) =>
+        old
+          ? old.map((row) =>
+              row.id === item.id ? { ...row, enabled: item.enabled } : row,
+            )
+          : old,
+      )
       return
     }
+    await queryClient.invalidateQueries({ queryKey: ['admin', 'webhooks'] })
+  }
+
+  async function removeProvider() {
+    if (!deletingProvider) return
+    const result = await adminDeleteProviderFn({
+      data: { id: deletingProvider.id },
+    })
+    if (!result.ok) {
+      toast.error(result.error.message)
+      throw new Error(result.error.message)
+    }
     toast.success('服务商已删除')
+    setDeletingProvider(null)
+    await refresh()
+  }
+
+  async function removeWebhook() {
+    if (!deletingWebhook) return
+    const result = await adminDeleteWebhookFn({
+      data: { id: deletingWebhook.id },
+    })
+    if (!result.ok) {
+      toast.error(result.error.message)
+      throw new Error(result.error.message)
+    }
+    toast.success('Webhook 端点已删除')
+    setDeletingWebhook(null)
     await refresh()
   }
 
@@ -204,7 +269,16 @@ function AdminProviders() {
             <Spinner className="size-5" />
           </div>
         ) : null}
-        {!providers.isLoading && (providers.data ?? []).length === 0 ? (
+        {providers.isError ? (
+          <ErrorState
+            error={providers.error}
+            title="服务商列表加载失败"
+            onRetry={() => void providers.refetch()}
+          />
+        ) : null}
+        {!providers.isLoading &&
+        !providers.isError &&
+        (providers.data ?? []).length === 0 ? (
           <EmptyHint>还没有服务商，先添加一个 Resend API Key</EmptyHint>
         ) : null}
 
@@ -225,9 +299,9 @@ function AdminProviders() {
                   <p className="text-caption-1-regular text-text-tertiary">
                     {item.kind} · 末四位 {item.apiKeyLast4 ?? '****'} ·{' '}
                     {[
-                      item.capabilities?.send ? '发件' : null,
-                      item.capabilities?.receive ? '收件' : null,
-                      item.capabilities?.domainApi ? '域名 API' : null,
+                      item.capabilities.send ? '发件' : null,
+                      item.capabilities.receive ? '收件' : null,
+                      item.capabilities.domainApi ? '域名 API' : null,
                     ]
                       .filter(Boolean)
                       .join(' / ')}
@@ -241,7 +315,7 @@ function AdminProviders() {
                 ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-3">
-                {item.capabilities?.domainApi ? (
+                {item.capabilities.domainApi ? (
                   <Button
                     size="small"
                     variant="secondary"
@@ -256,13 +330,25 @@ function AdminProviders() {
                   默认发件
                   <Switch
                     isSelected={item.isDefaultForSend}
-                    onChange={(value) => void setDefault(item.id, value)}
+                    isDisabled={pendingId === item.id}
+                    onChange={(value) => {
+                      void setDefault(item.id, value).catch(() => undefined)
+                    }}
                   />
                 </label>
                 <Button
                   size="small"
+                  variant="secondary"
+                  leadingIcon={RiEditLine}
+                  onClick={() => setEditingProvider(item)}
+                >
+                  编辑
+                </Button>
+                <Button
+                  size="small"
                   variant="ghost"
-                  onClick={() => void remove(item.id)}
+                  aria-label={`删除服务商 ${item.label}`}
+                  onClick={() => setDeletingProvider(item)}
                 >
                   <RiDeleteBinLine className="size-4" aria-hidden />
                 </Button>
@@ -285,7 +371,21 @@ function AdminProviders() {
           </Button>
         }
       >
-        {!webhooks.isLoading && (webhooks.data ?? []).length === 0 ? (
+        {webhooks.isLoading ? (
+          <div className="flex justify-center py-6">
+            <Spinner className="size-5" />
+          </div>
+        ) : null}
+        {webhooks.isError ? (
+          <ErrorState
+            error={webhooks.error}
+            title="Webhook 列表加载失败"
+            onRetry={() => void webhooks.refetch()}
+          />
+        ) : null}
+        {!webhooks.isLoading &&
+        !webhooks.isError &&
+        (webhooks.data ?? []).length === 0 ? (
           <EmptyHint>还没有 Webhook 端点。收件必须配置端点才能入库。</EmptyHint>
         ) : null}
 
@@ -311,6 +411,16 @@ function AdminProviders() {
                     <span className="text-caption-1-regular text-text-tertiary">
                       已收 {item.eventCount} 个事件
                     </span>
+                    <label className="flex items-center gap-1.5 text-caption-1-regular text-text-secondary">
+                      启用
+                      <Switch
+                        size="sm"
+                        isSelected={item.enabled}
+                        onChange={(enabled) =>
+                          void toggleWebhook(item, enabled)
+                        }
+                      />
+                    </label>
                     <Button
                       size="small"
                       variant="secondary"
@@ -326,17 +436,17 @@ function AdminProviders() {
                     </Button>
                     <Button
                       size="small"
+                      variant="secondary"
+                      leadingIcon={RiEditLine}
+                      onClick={() => setEditingWebhook(item)}
+                    >
+                      编辑
+                    </Button>
+                    <Button
+                      size="small"
                       variant="ghost"
-                      onClick={async () => {
-                        const result = await adminDeleteWebhookFn({
-                          data: { id: item.id },
-                        })
-                        if (!result.ok) {
-                          toast.error(result.error.message)
-                          return
-                        }
-                        await refresh()
-                      }}
+                      aria-label={`删除 Webhook ${item.label}`}
+                      onClick={() => setDeletingWebhook(item)}
                     >
                       <RiDeleteBinLine className="size-4" aria-hidden />
                     </Button>
@@ -372,6 +482,56 @@ function AdminProviders() {
         onToggle={toggleDiscovered}
         onToggleAll={toggleAllDiscovered}
         onImport={() => void importSelected()}
+      />
+
+      <EditProviderModal
+        provider={editingProvider}
+        onOpenChange={(open) => {
+          if (!open) setEditingProvider(null)
+        }}
+        onSaved={() => void refresh()}
+      />
+
+      <EditWebhookModal
+        webhook={editingWebhook}
+        onOpenChange={(open) => {
+          if (!open) setEditingWebhook(null)
+        }}
+        onSaved={() => void refresh()}
+      />
+
+      <AlertDialog
+        isOpen={Boolean(deletingProvider)}
+        onOpenChange={(open) => {
+          if (!open) setDeletingProvider(null)
+        }}
+        title="删除服务商"
+        description={
+          deletingProvider
+            ? `确定删除「${deletingProvider.label}」吗？仍有域名绑定时会被拒绝。`
+            : ''
+        }
+        confirmLabel="删除"
+        cancelLabel="取消"
+        pendingLabel="删除中…"
+        onConfirm={removeProvider}
+      />
+
+      <AlertDialog
+        isOpen={Boolean(deletingWebhook)}
+        onOpenChange={(open) => {
+          if (!open) setDeletingWebhook(null)
+        }}
+        title="删除 Webhook 端点"
+        description={
+          deletingWebhook
+            ? `确定删除「${deletingWebhook.label}」吗？删除后该地址立即停止接收事件。`
+            : ''
+        }
+        confirmLabel="删除"
+        cancelLabel="取消"
+        pendingLabel="删除中…"
+        onConfirm={removeWebhook}
       />
     </div>
   )
@@ -810,6 +970,223 @@ function AddWebhookModal({
             </Button>
             <Button onClick={submit} disabled={loading}>
               {loading ? '创建中…' : '创建'}
+            </Button>
+          </ModalFooter>
+        </>
+      )}
+    </Modal>
+  )
+}
+
+function EditProviderModal({
+  provider,
+  onOpenChange,
+  onSaved,
+}: {
+  provider: ProviderRow | null
+  onOpenChange: (open: boolean) => void
+  onSaved: () => void
+}) {
+  const [label, setLabel] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [apiBaseUrl, setApiBaseUrl] = useState('')
+  const [status, setStatus] = useState<'active' | 'invalid' | 'disabled'>(
+    'active',
+  )
+  const [isDefault, setIsDefault] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!provider) return
+    setLabel(provider.label)
+    setApiKey('')
+    setApiBaseUrl(provider.apiBaseUrl ?? '')
+    setStatus(
+      provider.status === 'invalid' || provider.status === 'disabled'
+        ? provider.status
+        : 'active',
+    )
+    setIsDefault(provider.isDefaultForSend)
+  }, [provider])
+
+  async function submit() {
+    if (!provider) return
+    if (!label.trim()) {
+      toast.error('请填写名称')
+      return
+    }
+    setSaving(true)
+    const result = await adminUpdateProviderFn({
+      data: {
+        id: provider.id,
+        label: label.trim(),
+        apiBaseUrl: apiBaseUrl.trim() || null,
+        status,
+        isDefaultForSend: isDefault,
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+      },
+    })
+    setSaving(false)
+    if (!result.ok) {
+      toast.error(result.error.message)
+      return
+    }
+    toast.success('服务商已更新')
+    setApiKey('')
+    onOpenChange(false)
+    onSaved()
+  }
+
+  return (
+    <Modal
+      isOpen={Boolean(provider)}
+      onOpenChange={(next) => {
+        if (!next) onOpenChange(false)
+      }}
+    >
+      {({ close }) => (
+        <>
+          <ModalHeader
+            title="编辑服务商"
+            description="API Key 留空表示不修改；界面只显示末四位"
+          />
+          <ModalBody className="flex flex-col gap-4">
+            <Input label="名称" value={label} onChange={setLabel} />
+            <Input
+              label="API Key"
+              type="password"
+              placeholder={
+                provider?.apiKeyLast4
+                  ? `已保存（末四位 ${provider.apiKeyLast4}），留空不修改`
+                  : '填写新的 API Key'
+              }
+              value={apiKey}
+              onChange={setApiKey}
+              inputDir="ltr"
+            />
+            <Input
+              label="API Base URL"
+              placeholder="https://mail.example.com"
+              value={apiBaseUrl}
+              onChange={setApiBaseUrl}
+              inputDir="ltr"
+              hint="仅兼容 Resend 协议的自建网关需要"
+            />
+            <Select
+              label="状态"
+              selectedKey={status}
+              onSelectionChange={(key) =>
+                setStatus(key as 'active' | 'invalid' | 'disabled')
+              }
+            >
+              <SelectItem id="active">正常</SelectItem>
+              <SelectItem id="invalid">标记为无效</SelectItem>
+              <SelectItem id="disabled">停用</SelectItem>
+            </Select>
+            <label className="flex items-center justify-between gap-2">
+              <span className="text-body-regular text-text-secondary">
+                设为默认发件服务商
+              </span>
+              <Switch isSelected={isDefault} onChange={setIsDefault} />
+            </label>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="secondary" onClick={close}>
+              取消
+            </Button>
+            <Button onClick={() => void submit()} disabled={saving}>
+              {saving ? '保存中…' : '保存'}
+            </Button>
+          </ModalFooter>
+        </>
+      )}
+    </Modal>
+  )
+}
+
+function EditWebhookModal({
+  webhook,
+  onOpenChange,
+  onSaved,
+}: {
+  webhook: WebhookRow | null
+  onOpenChange: (open: boolean) => void
+  onSaved: () => void
+}) {
+  const [label, setLabel] = useState('')
+  const [secret, setSecret] = useState('')
+  const [enabled, setEnabled] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!webhook) return
+    setLabel(webhook.label)
+    setSecret('')
+    setEnabled(webhook.enabled)
+  }, [webhook])
+
+  async function submit() {
+    if (!webhook) return
+    if (!label.trim()) {
+      toast.error('请填写名称')
+      return
+    }
+    setSaving(true)
+    const result = await adminUpdateWebhookFn({
+      data: {
+        id: webhook.id,
+        label: label.trim(),
+        enabled,
+        ...(secret.trim() ? { signingSecret: secret.trim() } : {}),
+      },
+    })
+    setSaving(false)
+    if (!result.ok) {
+      toast.error(result.error.message)
+      return
+    }
+    toast.success('Webhook 已更新')
+    setSecret('')
+    onOpenChange(false)
+    onSaved()
+  }
+
+  return (
+    <Modal
+      isOpen={Boolean(webhook)}
+      onOpenChange={(next) => {
+        if (!next) onOpenChange(false)
+      }}
+    >
+      {({ close }) => (
+        <>
+          <ModalHeader
+            title="编辑 Webhook 端点"
+            description="签名密钥留空表示不修改"
+          />
+          <ModalBody className="flex flex-col gap-4">
+            <Input label="名称" value={label} onChange={setLabel} />
+            <Input
+              label="签名密钥"
+              type="password"
+              placeholder={webhook?.hasSecret ? '已保存，留空不修改' : ''}
+              value={secret}
+              onChange={setSecret}
+              inputDir="ltr"
+            />
+            <label className="flex items-center justify-between gap-2">
+              <span className="text-body-regular text-text-secondary">
+                启用该端点
+              </span>
+              <Switch isSelected={enabled} onChange={setEnabled} />
+            </label>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="secondary" onClick={close}>
+              取消
+            </Button>
+            <Button onClick={() => void submit()} disabled={saving}>
+              {saving ? '保存中…' : '保存'}
             </Button>
           </ModalFooter>
         </>

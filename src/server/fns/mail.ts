@@ -10,13 +10,7 @@ import {
   removeMailbox,
   updateMailboxProfile,
 } from '#/server/mail/mailbox'
-import {
-  getMessage,
-  listMessages,
-  markRead,
-  moveMessage,
-  toggleStar,
-} from '#/server/mail/message'
+import { getMessage, listMessages, updateMessage } from '#/server/mail/message'
 import { getSendUsage, usageDateFor } from '#/server/mail/quota'
 import { sendMail } from '#/server/mail/send'
 import { getSiteSettings } from '#/server/settings'
@@ -126,15 +120,12 @@ export const updateMessageFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) =>
     attempt(async () => {
       const user = await requireUser()
-      if (typeof data.isRead === 'boolean') {
-        await markRead(user.id, data.id, data.isRead)
-      }
-      if (typeof data.isStarred === 'boolean') {
-        await toggleStar(user.id, data.id, data.isStarred)
-      }
-      if (data.folder) {
-        await moveMessage(user.id, data.id, data.folder)
-      }
+      // 三种变更合并为单条 UPDATE，避免串行写三次
+      await updateMessage(user.id, data.id, {
+        isRead: data.isRead,
+        isStarred: data.isStarred,
+        folder: data.folder,
+      })
       return { id: data.id }
     }),
   )

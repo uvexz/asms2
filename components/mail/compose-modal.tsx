@@ -17,6 +17,8 @@ import { quotaQuery } from '#/lib/api'
 import type { MailboxView } from '#/server/mail/mailbox'
 import { sendMailFn } from '#/server/fns/mail'
 
+import { requestMailRefresh } from './refresh-bus'
+
 export function ComposeModal({
   isOpen,
   onOpenChange,
@@ -101,8 +103,9 @@ export function ComposeModal({
     }
 
     toast.success('邮件已发送')
-    await queryClient.invalidateQueries({ queryKey: ['messages'] })
-    await queryClient.invalidateQueries({ queryKey: ['quota'] })
+    // 只刷新列表首页与配额；不再把无限列表的全部分页重取一遍
+    void queryClient.invalidateQueries({ queryKey: ['quota'] })
+    requestMailRefresh()
     onOpenChange(false)
   }
 

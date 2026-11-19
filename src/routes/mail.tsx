@@ -1,6 +1,8 @@
 import { Outlet, createFileRoute, redirect } from '@tanstack/react-router'
 
 import { MailShell } from '@/components/mail/mail-shell'
+import { RouteErrorState } from '@/components/application/errors/error-state'
+import { mailboxesQuery, messagesInfiniteQuery, quotaQuery } from '#/lib/api'
 
 const FOLDERS = ['inbox', 'sent', 'spam', 'trash', 'archive'] as const
 export type MailFolder = (typeof FOLDERS)[number]
@@ -32,6 +34,27 @@ export const Route = createFileRoute('/mail')({
       throw redirect({ to: '/verify-email' })
     }
   },
+  // 首屏数据在 loader 里预取：SSR 直接带出邮箱、配额与第一页邮件
+  loaderDeps: ({ search }) => ({
+    folder: search.folder,
+    mailboxId: search.mailboxId,
+    q: search.q,
+  }),
+  loader: async ({ context, deps }) => {
+    await Promise.all([
+      context.queryClient.ensureQueryData(mailboxesQuery),
+      context.queryClient.ensureQueryData(quotaQuery),
+      context.queryClient.ensureInfiniteQueryData(
+        messagesInfiniteQuery({
+          folder: deps.folder,
+          mailboxId: deps.mailboxId,
+          q: deps.q,
+        }),
+      ),
+    ])
+  },
+  head: () => ({ meta: [{ title: '邮箱' }] }),
+  errorComponent: RouteErrorState,
   component: MailLayout,
 })
 

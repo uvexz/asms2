@@ -15,6 +15,7 @@ import { Input } from '@/components/base/input/input'
 import { Switch } from '@/components/base/switch/switch'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { toast } from '@/components/base/toast/toast'
+import { ErrorState } from '@/components/application/errors/error-state'
 import { KeyValue, PageSection } from '@/components/admin/ui'
 import { formatDateTime, unwrap } from '#/lib/api'
 import {
@@ -26,6 +27,7 @@ import {
 } from '#/server/fns/telegram'
 
 export const Route = createFileRoute('/admin/telegram')({
+  head: () => ({ meta: [{ title: 'Telegram · 管理后台' }] }),
   component: AdminTelegram,
 })
 
@@ -109,6 +111,16 @@ function AdminTelegram() {
       return
     }
     toast.success(`已发送 ${result.data.sent} 条测试消息`)
+  }
+
+  if (query.isError) {
+    return (
+      <ErrorState
+        error={query.error}
+        title="Telegram 配置加载失败"
+        onRetry={() => void query.refetch()}
+      />
+    )
   }
 
   if (!data) {

@@ -4,10 +4,7 @@ import { RiArrowRightLine } from '@remixicon/react'
 
 import { ThemeToggle } from '@/components/application/theme/theme-toggle'
 import { buttonStyles } from '@/components/base/buttons/button'
-import {
-  linkButtonStyles,
-  LinkButton,
-} from '@/components/base/buttons/link-button'
+import { linkButtonStyles } from '@/components/base/buttons/link-button'
 import { cx } from '@/utils/cx'
 
 import {
@@ -257,13 +254,14 @@ export function LandingPage({ site, signedIn }: LandingPageProps) {
                     ? '创建邮箱'
                     : '登录'}
               </PrimaryCta>
-              <LinkButton
-                href={signedIn ? '/mail?folder=inbox' : '/login'}
-                variant="secondary"
-                trailingIcon={RiArrowRightLine}
+              <Link
+                to={signedIn ? '/mail' : '/login'}
+                search={signedIn ? { folder: 'inbox' } : undefined}
+                className={QUIET_LINK_CLASS}
               >
                 {signedIn ? '继续收件' : '已有账号，去登录'}
-              </LinkButton>
+                <RiArrowRightLine className="size-5 shrink-0" aria-hidden />
+              </Link>
             </div>
 
             <p

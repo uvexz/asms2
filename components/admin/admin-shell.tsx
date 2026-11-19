@@ -13,6 +13,7 @@ import {
 } from '@remixicon/react'
 
 import { IconButton } from '@/components/base/buttons/icon-button'
+import { ThemeToggle } from '@/components/application/theme/theme-toggle'
 import { AppShell } from '@/components/shell/app-shell'
 import {
   SidebarAccount,
@@ -91,6 +92,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <SidebarAccount />
           <div className="min-h-0 flex-1 overflow-y-auto">
             <AdminNav onNavigate={closeNav} />
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t border-separator-border pt-3">
+            <span className="text-caption-1-regular text-text-tertiary">
+              主题
+            </span>
+            <ThemeToggle appearance="segmented" size="small" />
           </div>
         </div>
       )}

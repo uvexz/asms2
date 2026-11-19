@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { RiSaveLine } from '@remixicon/react'
 
 import { Button } from '@/components/base/buttons/button'
@@ -8,12 +8,15 @@ import { Input } from '@/components/base/input/input'
 import { Switch } from '@/components/base/switch/switch'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { toast } from '@/components/base/toast/toast'
+import { ErrorState } from '@/components/application/errors/error-state'
 import { PageSection } from '@/components/admin/ui'
 import { adminGetSettingsFn, adminUpdateSettingsFn } from '#/server/fns/admin'
 import { unwrap } from '#/lib/api'
+import { isValidTimeZone } from '#/lib/timezone'
 import type { SiteSettings } from '#/server/settings'
 
 export const Route = createFileRoute('/admin/site')({
+  head: () => ({ meta: [{ title: '站点信息 · 管理后台' }] }),
   component: AdminSite,
 })
 
@@ -76,6 +79,8 @@ const BOOLEAN_FIELDS: {
 ]
 
 function AdminSite() {
+  const router = useRouter()
+  const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['admin', 'site'],
     queryFn: async () => unwrap(await adminGetSettingsFn()),
@@ -87,6 +92,16 @@ function AdminSite() {
     if (query.data) setForm(query.data)
   }, [query.data])
 
+  if (query.isError) {
+    return (
+      <ErrorState
+        error={query.error}
+        title="站点配置加载失败"
+        onRetry={() => void query.refetch()}
+      />
+    )
+  }
+
   if (!form) {
     return (
       <div className="flex justify-center py-16">
@@ -95,47 +110,65 @@ function AdminSite() {
     )
   }
 
-  function set<K extends keyof SiteSettings>(key: K, value: SiteSettings[K]) {
+  function set<TKey extends keyof SiteSettings>(
+    key: TKey,
+    value: SiteSettings[TKey],
+  ) {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev))
   }
 
   async function save() {
     if (!form) return
-    setSaving(true)
-    const result = await adminUpdateSettingsFn({
-      data: {
-        siteName: form.siteName,
-        siteDescription: form.siteDescription,
-        logoUrl: form.logoUrl,
-        faviconUrl: form.faviconUrl,
-        contactEmail: form.contactEmail,
-        icpRecord: form.icpRecord,
-        footerText: form.footerText,
-        registrationEnabled: form.registrationEnabled,
-        defaultMailboxLimit: form.defaultMailboxLimit,
-        defaultDailySendLimit: form.defaultDailySendLimit,
-        permanentPrefixMin: form.permanentPrefixMin,
-        tempPrefixMin: form.tempPrefixMin,
-        prefixMax: form.prefixMax,
-        tempTtlMinutes: form.tempTtlMinutes,
-        tempGraceMinutes: form.tempGraceMinutes,
-        tempCooldownHours: form.tempCooldownHours,
-        permanentCooldownDays: form.permanentCooldownDays,
-        allowTempSend: form.allowTempSend,
-        allowUserDomainChoice: form.allowUserDomainChoice,
-        adminCanReadMail: form.adminCanReadMail,
-        trashRetentionDays: form.trashRetentionDays,
-        orphanRetentionDays: form.orphanRetentionDays,
-        deletedMailboxRetentionDays: form.deletedMailboxRetentionDays,
-        timezone: form.timezone,
-      },
-    })
-    setSaving(false)
-    if (!result.ok) {
-      toast.error(result.error.message)
+    if (!isValidTimeZone(form.timezone)) {
+      toast.error('时区不合法，请填写 IANA 时区（如 Asia/Shanghai）')
       return
     }
-    toast.success('站点配置已保存')
+    setSaving(true)
+    try {
+      const result = await adminUpdateSettingsFn({
+        data: {
+          siteName: form.siteName,
+          siteDescription: form.siteDescription,
+          logoUrl: form.logoUrl,
+          faviconUrl: form.faviconUrl,
+          contactEmail: form.contactEmail,
+          icpRecord: form.icpRecord,
+          footerText: form.footerText,
+          registrationEnabled: form.registrationEnabled,
+          defaultMailboxLimit: form.defaultMailboxLimit,
+          defaultDailySendLimit: form.defaultDailySendLimit,
+          permanentPrefixMin: form.permanentPrefixMin,
+          tempPrefixMin: form.tempPrefixMin,
+          prefixMax: form.prefixMax,
+          tempTtlMinutes: form.tempTtlMinutes,
+          tempGraceMinutes: form.tempGraceMinutes,
+          tempCooldownHours: form.tempCooldownHours,
+          permanentCooldownDays: form.permanentCooldownDays,
+          allowTempSend: form.allowTempSend,
+          allowUserDomainChoice: form.allowUserDomainChoice,
+          adminCanReadMail: form.adminCanReadMail,
+          trashRetentionDays: form.trashRetentionDays,
+          orphanRetentionDays: form.orphanRetentionDays,
+          deletedMailboxRetentionDays: form.deletedMailboxRetentionDays,
+          timezone: form.timezone,
+        },
+      })
+      if (!result.ok) {
+        toast.error(result.error.message)
+        return
+      }
+      toast.success('站点配置已保存')
+      // 根 loader 的站点信息在 SPA 内是陈旧快照，保存后主动刷新，
+      // 否则侧栏站名要等整页刷新才更新
+      queryClient.setQueryData(['admin', 'site'], result.data)
+      await queryClient.invalidateQueries({ queryKey: ['public-login-config'] })
+      await router.invalidate()
+    } catch (error) {
+      // 校验失败由 server fn 的 validator 抛出，不会走 result 分支
+      toast.error(error instanceof Error ? error.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -217,7 +250,8 @@ function AdminSite() {
             label="站点时区"
             value={form.timezone}
             onChange={(value) => set('timezone', value)}
-            hint="用于每日配额重置"
+            hint="IANA 时区，如 Asia/Shanghai；用于每日配额重置"
+            inputDir="ltr"
           />
         </div>
       </PageSection>

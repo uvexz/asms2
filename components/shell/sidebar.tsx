@@ -3,8 +3,10 @@ import {
   Link,
   getRouteApi,
   useNavigate,
+  useRouter,
   useRouterState,
 } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   RiArrowDownSLine,
   RiLogoutBoxRLine,
@@ -38,7 +40,8 @@ export function SidebarNav({ children }: { children: ReactNode }) {
 
 function itemClass(active: boolean) {
   return cx(
-    'flex items-center gap-2 rounded-lg px-2.5 py-2 text-body-medium transition-colors',
+    'flex items-center gap-2 rounded-lg px-2.5 py-2 text-body-medium transition-colors outline-none',
+    'focus-visible:ring-2 focus-visible:ring-border-focus-ring',
     active
       ? 'bg-accent-50 text-accent-700'
       : 'text-text-secondary hover:bg-background-secondary-hover',
@@ -98,6 +101,8 @@ export function SidebarNavLink({
 export function SidebarAccount() {
   const { session } = rootApi.useRouteContext()
   const navigate = useNavigate()
+  const router = useRouter()
+  const queryClient = useQueryClient()
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
@@ -159,6 +164,11 @@ export function SidebarAccount() {
           <DropdownItem
             onSelect={async () => {
               await authClient.signOut()
+              // Passkey 等客户端登录不会重建 QueryClient，必须显式清缓存，
+              // 否则换号后首屏会读到上一个账号的邮件/邮箱数据
+              queryClient.clear()
+              // 当前路由的守卫会重定向到登录页，invalidate 期间的跳转不算错误
+              await router.invalidate().catch(() => undefined)
               await navigate({ to: '/login' })
             }}
           >

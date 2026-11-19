@@ -8,9 +8,11 @@ import {
 
 import { Button } from '@/components/base/buttons/button'
 import { toast } from '@/components/base/toast/toast'
+import { ThemeCorner } from '@/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
 
 export const Route = createFileRoute('/verify-email')({
+  head: () => ({ meta: [{ title: '验证邮箱' }] }),
   validateSearch: (search: Record<string, unknown>): { verified?: string } =>
     search.verified === '1' ? { verified: '1' } : {},
   beforeLoad: ({ context }) => {
@@ -75,6 +77,7 @@ function VerifyEmailPage() {
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-background-full px-4 py-10">
+      <ThemeCorner />
       <div className="w-full max-w-[460px] rounded-3xl border border-border-button-default bg-background-primary-default p-6 shadow-xs sm:p-8">
         <RiMailCheckLine
           className="size-8 text-foreground-icon-primary"

@@ -8,6 +8,7 @@ import {
 import { AdminShell } from '@/components/admin/admin-shell'
 
 export const Route = createFileRoute('/admin')({
+  head: () => ({ meta: [{ title: '管理后台' }] }),
   beforeLoad: ({ context }) => {
     if (!context.session) throw redirect({ to: '/login' })
     if (context.session.role !== 'admin') throw notFound()

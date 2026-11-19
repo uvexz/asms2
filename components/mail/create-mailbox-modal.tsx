@@ -38,9 +38,9 @@ export function CreateMailboxModal({
   const [domainId, setDomainId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const tempPrefixMin = Math.max(site?.tempPrefixMin ?? 8, 8)
-  const permanentPrefixMin = site?.permanentPrefixMin ?? 3
-  const prefixMax = site?.prefixMax ?? 32
+  const tempPrefixMin = Math.max(site.tempPrefixMin ?? 8, 8)
+  const permanentPrefixMin = site.permanentPrefixMin ?? 3
+  const prefixMax = site.prefixMax ?? 32
 
   const domains = useQuery({ ...domainsQuery(kind), enabled: isOpen })
 

@@ -1,21 +1,24 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { RiArrowLeftLine, RiMailSendLine } from '@remixicon/react'
 
 import { Button } from '@/components/base/buttons/button'
 import { Input } from '@/components/base/input/input'
 import { toast } from '@/components/base/toast/toast'
+import { ThemeCorner } from '@/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
-
-const rootApi = getRouteApi('__root__')
+import { loginConfigQuery } from '#/lib/api'
 
 export const Route = createFileRoute('/forgot-password')({
+  head: () => ({ meta: [{ title: '找回密码' }] }),
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData(loginConfigQuery),
   component: ForgotPasswordPage,
 })
 
 function ForgotPasswordPage() {
-  const { auth } = rootApi.useLoaderData()
+  const auth = Route.useLoaderData()
   const emailEnabled = auth.emailPassword.enabled
   const canSend = auth.emailPassword.canSend
   const [email, setEmail] = useState('')
@@ -46,6 +49,7 @@ function ForgotPasswordPage() {
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-background-full px-4 py-10">
+      <ThemeCorner />
       <div className="w-full max-w-[460px] rounded-3xl border border-border-button-default bg-background-primary-default p-6 shadow-xs sm:p-8">
         <RiMailSendLine
           className="size-8 text-foreground-icon-primary"
