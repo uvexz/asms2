@@ -666,16 +666,16 @@ export const adminDeleteWebhookFn = createServerFn({ method: 'POST' })
 
 /* ----------------------------------------------------------- login methods */
 
-const LOGIN_METHOD_IDS = [
+const LOGIN_METHOD_KINDS = [
   'email',
   'google',
   'github',
   'oidc',
   'passkey',
 ] as const
-type LoginMethodId = (typeof LOGIN_METHOD_IDS)[number]
+type LoginMethodKind = (typeof LOGIN_METHOD_KINDS)[number]
 
-const LOGIN_METHOD_NAMES: Record<LoginMethodId, string> = {
+const LOGIN_METHOD_NAMES: Record<LoginMethodKind, string> = {
   email: '邮箱密码',
   google: 'Google',
   github: 'GitHub',
@@ -683,10 +683,44 @@ const LOGIN_METHOD_NAMES: Record<LoginMethodId, string> = {
   passkey: 'Passkey',
 }
 
-const OAUTH_METHOD_IDS = new Set<LoginMethodId>(['google', 'github', 'oidc'])
+const OAUTH_METHOD_KINDS = new Set<LoginMethodKind>([
+  'google',
+  'github',
+  'oidc',
+])
 
-function isOAuthMethod(id: LoginMethodId) {
-  return OAUTH_METHOD_IDS.has(id)
+function isOAuthMethod(kind: LoginMethodKind) {
+  return OAUTH_METHOD_KINDS.has(kind)
+}
+
+/** OIDC 的 providerId 会成为回调路径段，只允许小写字母、数字与中划线 */
+const PROVIDER_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/
+/** 内置登录方式占用的 ID，不能被 OIDC 复用 */
+const RESERVED_PROVIDER_IDS = new Set<string>([
+  'email',
+  'google',
+  'github',
+  'passkey',
+])
+
+function normalizeOidcProviderId(raw: string | undefined): string {
+  const value = raw?.trim().toLowerCase() ?? ''
+  if (!value) {
+    throw new AppError('validation_failed', '请填写回调标识（providerId）')
+  }
+  if (!PROVIDER_ID_PATTERN.test(value)) {
+    throw new AppError(
+      'validation_failed',
+      '回调标识只能包含小写字母、数字和中划线，长度 1–40',
+    )
+  }
+  if (RESERVED_PROVIDER_IDS.has(value)) {
+    throw new AppError(
+      'validation_failed',
+      `「${value}」是内置登录方式的保留标识`,
+    )
+  }
+  return value
 }
 
 async function countEnabledMethods() {
@@ -709,13 +743,17 @@ export const adminListLoginMethodsFn = createServerFn({
   attempt(async () => {
     await requireAdmin()
     const [rows, settings, canSend] = await Promise.all([
-      db.select().from(authProvider).orderBy(authProvider.sortOrder),
+      db
+        .select()
+        .from(authProvider)
+        .orderBy(authProvider.sortOrder, authProvider.createdAt),
       getSiteSettings(true),
       canSendSystemMail(),
     ])
     return {
       methods: rows.map((row) => ({
         id: row.id,
+        kind: row.kind,
         providerId: row.providerId,
         displayName: row.displayName,
         enabled: row.enabled,
@@ -733,7 +771,9 @@ export const adminListLoginMethodsFn = createServerFn({
 )
 
 const createLoginMethodSchema = z.object({
-  providerId: z.enum(LOGIN_METHOD_IDS),
+  kind: z.enum(LOGIN_METHOD_KINDS),
+  /** 仅 OIDC 使用：自定义回调标识 /api/auth/callback/{providerId} */
+  providerId: z.string().max(40).optional(),
   displayName: z.string().min(1).max(40).optional(),
   clientId: z.string().max(300).nullable().optional(),
   clientSecret: z.string().max(300).optional(),
@@ -747,44 +787,47 @@ export const adminCreateLoginMethodFn = createServerFn({ method: 'POST' })
     attempt(async () => {
       const actor = await requireAdmin()
 
+      const kind = data.kind
+      const oauth = isOAuthMethod(kind)
+      const providerId =
+        kind === 'oidc' ? normalizeOidcProviderId(data.providerId) : kind
+
       const existing = (
         await db
           .select({ id: authProvider.id })
           .from(authProvider)
-          .where(eq(authProvider.providerId, data.providerId))
+          .where(eq(authProvider.providerId, providerId))
           .limit(1)
       )[0]
       if (existing) {
-        throw new AppError('conflict', '该登录方式已存在', 409)
+        throw new AppError('conflict', '该回调标识已被使用', 409)
       }
 
-      if (isOAuthMethod(data.providerId)) {
+      if (oauth) {
         if (!data.clientId?.trim()) {
           throw new AppError('validation_failed', '请填写 Client ID')
         }
         if (!data.clientSecret?.trim()) {
           throw new AppError('validation_failed', '请填写 Client Secret')
         }
-        if (data.providerId === 'oidc' && !data.issuer?.trim()) {
+        if (kind === 'oidc' && !data.issuer?.trim()) {
           throw new AppError('validation_failed', '请填写 OIDC Issuer')
         }
       }
 
-      const oauth = isOAuthMethod(data.providerId)
       const id = idPart()
       await db.insert(authProvider).values({
         id,
-        providerId: data.providerId,
-        displayName:
-          data.displayName?.trim() || LOGIN_METHOD_NAMES[data.providerId],
+        kind,
+        providerId,
+        displayName: data.displayName?.trim() || LOGIN_METHOD_NAMES[kind],
         enabled: true,
         clientId: oauth ? (data.clientId?.trim() ?? null) : null,
         clientSecretEnc:
           oauth && data.clientSecret ? encryptSecret(data.clientSecret) : null,
-        issuer:
-          data.providerId === 'oidc' ? (data.issuer?.trim() ?? null) : null,
+        issuer: kind === 'oidc' ? (data.issuer?.trim() ?? null) : null,
         scopes: oauth ? data.scopes?.trim() || null : null,
-        sortOrder: LOGIN_METHOD_IDS.indexOf(data.providerId),
+        sortOrder: LOGIN_METHOD_KINDS.indexOf(kind),
         createdAt: new Date(),
         updatedAt: new Date(),
         updatedBy: actor.id,
@@ -792,9 +835,10 @@ export const adminCreateLoginMethodFn = createServerFn({ method: 'POST' })
 
       await invalidateLoginMethodCaches()
       await audit(actor.id, 'login_method.create', 'auth_provider', id, {
-        providerId: data.providerId,
+        kind,
+        providerId,
       })
-      return { id, providerId: data.providerId }
+      return { id, kind, providerId }
     }),
   )
 
@@ -831,13 +875,14 @@ export const adminUpdateLoginMethodFn = createServerFn({ method: 'POST' })
         }
       }
 
-      const oauth = isOAuthMethod(row.providerId as LoginMethodId)
+      const kind = row.kind as LoginMethodKind
+      const oauth = isOAuthMethod(kind)
       const { id, clientSecret, ...rest } = data
       await db
         .update(authProvider)
         .set({
           ...rest,
-          ...(row.providerId === 'oidc' && data.issuer !== undefined
+          ...(kind === 'oidc' && data.issuer !== undefined
             ? { issuer: data.issuer?.trim() || null }
             : {}),
           ...(oauth && data.clientId !== undefined

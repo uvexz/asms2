@@ -141,7 +141,7 @@ erDiagram
 | 表              | 关键字段                                                                                                                                                             | 说明                                    |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | `site_settings` | 单行 `default`；站点资料、注册开关、`email_verification_required`、默认配额、前缀长度、`temp_ttl_minutes`（考察期）、`temp_grace_minutes`、冷却时长、`deleted_mailbox_retention_days`、`allow_temp_send`、`admin_can_read_mail`、时区 | typed 单行配置，零散扩展放 `extra_json` |
-| `auth_provider` | providerId(UK)、displayName、enabled、clientId、clientSecretEnc、issuer、scopes；providerId ∈ email/google/github/oidc/passkey | 登录方式配置，保存后触发 auth 实例重建 |
+| `auth_provider` | kind（email/google/github/oidc/passkey）、providerId(UK，运行时 ID 与回调路径段)、displayName、enabled、clientId、clientSecretEnc、issuer、scopes | 登录方式配置，保存后触发 auth 实例重建；OIDC 可多条 |
 | `app_meta`      | key(PK), value                                                                                                                                                       | 配置版本号等                            |
 
 **邮箱与邮件（4 张）**
@@ -304,12 +304,13 @@ erDiagram
 
 ### 5.7 登录方式（动态）
 
-登录方式统一存在 `auth_provider`：`email`（邮箱密码，默认开启）、`google`、`github`、`oidc`、`passkey`。
+登录方式统一存在 `auth_provider`：`kind` 决定类型（`email` 邮箱密码，默认开启、`google`、`github`、`oidc`、`passkey`），`providerId` 是唯一运行时 ID。
+内置类型（email/google/github/passkey）的 `providerId` 固定等于 `kind`；`oidc` 允许添加多条，每条用管理员自定义的 `providerId`（小写字母/数字/中划线）作为回调路径段。
 Better Auth 的 `emailAndPassword` / `socialProviders` / 插件列表在实例创建时固定，因此 `getAuth()` 是带版本号的异步单例：
 
 - 管理面板保存 → `app_meta.auth_config_version` 自增 → 进程内 `invalidateAuthCache()`。
 - 下次请求发现版本变化即重建实例；多实例靠 30s 版本轮询生效。
-- 回调地址固定为 `{BETTER_AUTH_URL}/api/auth/callback/{providerId}`。
+- 回调地址为 `{BETTER_AUTH_URL}/api/auth/callback/{providerId}`；OIDC 的 `providerId` 即自定义回调标识。
 - 至少保留一种启用的方式：停用/删除最后一种由服务端拒绝（409）。
 - 删除方式只删配置行，`account` 里的密码/社交凭证保留；重新添加后仍可登录。
 - Passkey 的 `rpID` / `origin` 取自 `BETTER_AUTH_URL`，因此生产必须使用 HTTPS。

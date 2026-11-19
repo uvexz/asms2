@@ -70,7 +70,7 @@ function RegisterPage() {
     await navigate({ to: '/mail', search: { folder: 'inbox' } })
   }
 
-  async function handleProvider(provider: LoginSocialMethod['providerId']) {
+  async function handleProvider(provider: string) {
     await authClient.signIn.social({
       provider,
       callbackURL: '/mail',

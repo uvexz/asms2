@@ -5,7 +5,13 @@ import { authProvider } from '#/db/schema'
 import { canSendSystemMail } from '#/server/mail/system'
 import { getSiteSettings } from '#/server/settings'
 
-export type SocialProviderId = 'google' | 'github' | 'oidc'
+export type SocialProviderKind = 'google' | 'github' | 'oidc'
+
+export interface PublicSocialProvider {
+  providerId: string
+  kind: SocialProviderKind
+  displayName: string
+}
 
 export interface PublicLoginConfig {
   emailPassword: {
@@ -14,11 +20,11 @@ export interface PublicLoginConfig {
     /** 是否已配置可发信的服务商与域名；未配置时验证/重置邮件发不出去 */
     canSend: boolean
   }
-  social: { providerId: SocialProviderId; displayName: string }[]
+  social: PublicSocialProvider[]
   passkey: { enabled: boolean }
 }
 
-const SOCIAL_IDS = new Set<string>(['google', 'github', 'oidc'])
+const SOCIAL_KINDS = new Set<string>(['google', 'github', 'oidc'])
 
 const CACHE_TTL = 60_000
 
@@ -48,9 +54,10 @@ export async function getPublicLoginConfig(): Promise<PublicLoginConfig> {
         canSend,
       },
       social: rows
-        .filter((row) => row.enabled && SOCIAL_IDS.has(row.providerId))
+        .filter((row) => row.enabled && SOCIAL_KINDS.has(row.kind))
         .map((row) => ({
-          providerId: row.providerId as SocialProviderId,
+          providerId: row.providerId,
+          kind: row.kind as SocialProviderKind,
           displayName: row.displayName,
         })),
       passkey: { enabled: Boolean(methods.get('passkey')?.enabled) },

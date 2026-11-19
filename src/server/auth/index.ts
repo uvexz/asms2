@@ -75,14 +75,15 @@ async function buildAuth(): Promise<AuthInstance> {
       continue
     }
 
-    if (provider.providerId === 'google' || provider.providerId === 'github') {
-      socialProviders[provider.providerId] = {
+    if (provider.kind === 'google' || provider.kind === 'github') {
+      // 内置品牌登录的 providerId 必须与品牌一致，避免回调路径漂移
+      socialProviders[provider.kind] = {
         clientId: provider.clientId,
         clientSecret,
       }
-    } else if (provider.providerId === 'oidc' && provider.issuer) {
+    } else if (provider.kind === 'oidc' && provider.issuer) {
       oauthConfigs.push({
-        providerId: 'oidc',
+        providerId: provider.providerId,
         clientId: provider.clientId,
         clientSecret,
         discoveryUrl: `${provider.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`,

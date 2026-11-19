@@ -86,8 +86,8 @@ function LoginPage() {
     await goAfterLogin(Boolean(result.user.emailVerified))
   }
 
-  async function handleProvider(provider: LoginSocialMethod['providerId']) {
-    // genericOAuth 在 1.7 里复用标准 signIn.social，providerId 即 'oidc'
+  async function handleProvider(provider: string) {
+    // genericOAuth 复用标准 signIn.social，provider 即各 OIDC 的自定义 providerId
     await authClient.signIn.social({
       provider,
       callbackURL: '/mail',

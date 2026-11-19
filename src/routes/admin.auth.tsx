@@ -41,10 +41,11 @@ export const Route = createFileRoute('/admin/auth')({
   component: AdminAuth,
 })
 
-type LoginMethodId = 'email' | 'google' | 'github' | 'oidc' | 'passkey'
+type LoginMethodKind = 'email' | 'google' | 'github' | 'oidc' | 'passkey'
 
 interface LoginMethodRow {
   id: string
+  kind: string
   providerId: string
   displayName: string
   enabled: boolean
@@ -55,7 +56,7 @@ interface LoginMethodRow {
 }
 
 const METHOD_META: Record<
-  LoginMethodId,
+  LoginMethodKind,
   { label: string; icon: ComponentType<{ className?: string }>; hint: string }
 > = {
   email: {
@@ -76,7 +77,7 @@ const METHOD_META: Record<
   oidc: {
     label: '通用 OIDC',
     icon: RiLinkM,
-    hint: '填写 Issuer，会自动拼接 /.well-known/openid-configuration',
+    hint: '填写 Issuer 和自定义回调标识，可添加多个不同的 OIDC 服务商',
   },
   passkey: {
     label: 'Passkey',
@@ -85,7 +86,7 @@ const METHOD_META: Record<
   },
 }
 
-const METHOD_ORDER: LoginMethodId[] = [
+const METHOD_ORDER: LoginMethodKind[] = [
   'email',
   'google',
   'github',
@@ -93,16 +94,21 @@ const METHOD_ORDER: LoginMethodId[] = [
   'passkey',
 ]
 
-function isOAuth(id: string) {
-  return id === 'google' || id === 'github' || id === 'oidc'
+function isOAuth(kind: string) {
+  return kind === 'google' || kind === 'github' || kind === 'oidc'
 }
 
-const METHOD_META_BY_ID = new Map<string, (typeof METHOD_META)[LoginMethodId]>(
-  Object.entries(METHOD_META),
-)
+const METHOD_META_BY_KIND = new Map<
+  string,
+  (typeof METHOD_META)[LoginMethodKind]
+>(Object.entries(METHOD_META))
 
-function methodMeta(id: string) {
-  return METHOD_META_BY_ID.get(id) ?? METHOD_META.oidc
+function methodMeta(kind: string) {
+  return METHOD_META_BY_KIND.get(kind) ?? METHOD_META.oidc
+}
+
+function callbackPath(providerId: string) {
+  return `/api/auth/callback/${providerId}`
 }
 
 function AdminAuth() {
@@ -118,8 +124,11 @@ function AdminAuth() {
 
   const data = query.data
   const methods = data?.methods ?? []
-  const used = new Set(methods.map((item) => item.providerId))
-  const available = METHOD_ORDER.filter((id) => !used.has(id))
+  const usedKinds = new Set(methods.map((item) => item.kind))
+  // 通用 OIDC 支持多条，始终可以继续添加
+  const available = METHOD_ORDER.filter(
+    (kind) => kind === 'oidc' || !usedKinds.has(kind),
+  )
 
   async function refresh() {
     await queryClient.invalidateQueries({
@@ -188,18 +197,20 @@ function AdminAuth() {
 
         <div className="flex flex-col gap-3">
           {methods.map((method) => {
-            const meta = methodMeta(method.providerId)
+            const meta = methodMeta(method.kind)
             const Icon = meta.icon
-            const detail = isOAuth(method.providerId)
+            const detail = isOAuth(method.kind)
               ? [
-                  method.clientId
-                    ? `Client ID 末四位 ${method.clientId.slice(-4)}`
-                    : '未填写 Client ID',
+                  method.kind === 'oidc'
+                    ? `回调 ${callbackPath(method.providerId)}`
+                    : method.clientId
+                      ? `Client ID 末四位 ${method.clientId.slice(-4)}`
+                      : '未填写 Client ID',
                   method.issuer ?? null,
                 ]
                   .filter(Boolean)
                   .join(' · ')
-              : method.providerId === 'email'
+              : method.kind === 'email'
                 ? `邮箱验证：${data?.emailVerification.enabled ? '开' : '关'}`
                 : meta.hint
 
@@ -235,7 +246,7 @@ function AdminAuth() {
                         onChange={(value) => void toggle(method, value)}
                       />
                     </label>
-                    {isOAuth(method.providerId) ? (
+                    {isOAuth(method.kind) ? (
                       <Button
                         size="small"
                         variant="secondary"
@@ -255,7 +266,7 @@ function AdminAuth() {
                   </div>
                 </div>
 
-                {method.providerId === 'email' ? (
+                {method.kind === 'email' ? (
                   <div className="flex flex-col gap-1 border-t border-separator-border pt-3">
                     <label className="flex items-center justify-between gap-2">
                       <span className="text-body-regular text-text-secondary">
@@ -306,7 +317,7 @@ function AdminAuth() {
         title="删除登录方式"
         description={
           deleting
-            ? `确定删除「${deleting.displayName || methodMeta(deleting.providerId).label}」吗？该方式的用户凭证会保留，重新添加后可继续登录。`
+            ? `确定删除「${deleting.displayName || methodMeta(deleting.kind).label}」吗？该方式的用户凭证会保留，重新添加后可继续登录。`
             : ''
         }
         confirmLabel="删除"
@@ -328,10 +339,11 @@ function AddMethodModal({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  available: LoginMethodId[]
+  available: LoginMethodKind[]
   onCreated: () => void
 }) {
-  const [kind, setKind] = useState<LoginMethodId>('google')
+  const [kind, setKind] = useState<LoginMethodKind>('google')
+  const [providerId, setProviderId] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [clientId, setClientId] = useState('')
   const [secret, setSecret] = useState('')
@@ -339,13 +351,15 @@ function AddMethodModal({
   const [scopes, setScopes] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const fallback: LoginMethodId | undefined = available.at(0)
-  const selected: LoginMethodId | undefined = available.includes(kind)
+  const fallback: LoginMethodKind | undefined = available.at(0)
+  const selected: LoginMethodKind | undefined = available.includes(kind)
     ? kind
     : fallback
   const meta = selected ? methodMeta(selected) : methodMeta('google')
+  const isOidc = selected === 'oidc'
 
   function reset() {
+    setProviderId('')
     setDisplayName('')
     setClientId('')
     setSecret('')
@@ -356,6 +370,17 @@ function AddMethodModal({
   async function submit() {
     if (!selected) return
     if (isOAuth(selected)) {
+      if (isOidc && !providerId.trim()) {
+        toast.error('请填写回调标识')
+        return
+      }
+      if (
+        isOidc &&
+        !/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(providerId)
+      ) {
+        toast.error('回调标识只能包含小写字母、数字和中划线，长度 1–40')
+        return
+      }
       if (!clientId.trim()) {
         toast.error('请填写 Client ID')
         return
@@ -364,8 +389,12 @@ function AddMethodModal({
         toast.error('请填写 Client Secret')
         return
       }
-      if (selected === 'oidc' && !issuer.trim()) {
+      if (isOidc && !issuer.trim()) {
         toast.error('请填写 OIDC Issuer')
+        return
+      }
+      if (isOidc && !displayName.trim()) {
+        toast.error('请填写名称')
         return
       }
     }
@@ -373,11 +402,12 @@ function AddMethodModal({
     setSaving(true)
     const result = await adminCreateLoginMethodFn({
       data: {
-        providerId: selected,
+        kind: selected,
+        providerId: isOidc ? providerId.trim() : undefined,
         displayName: displayName.trim() || undefined,
         clientId: isOAuth(selected) ? clientId.trim() : null,
         clientSecret: isOAuth(selected) ? secret.trim() : undefined,
-        issuer: selected === 'oidc' ? issuer.trim() : null,
+        issuer: isOidc ? issuer.trim() : null,
         scopes: scopes.trim() || null,
       },
     })
@@ -411,7 +441,10 @@ function AddMethodModal({
             <Select
               label="类型"
               selectedKey={selected ?? null}
-              onSelectionChange={(key) => setKind(key as LoginMethodId)}
+              onSelectionChange={(key) => {
+                setKind(key as LoginMethodKind)
+                setProviderId('')
+              }}
             >
               {available.map((id) => (
                 <SelectItem key={id} id={id}>
@@ -426,6 +459,39 @@ function AddMethodModal({
 
             {isOAuth(selected ?? '') ? (
               <>
+                {isOidc ? (
+                  <>
+                    <Input
+                      label="名称"
+                      placeholder="例如：公司 SSO"
+                      value={displayName}
+                      onChange={setDisplayName}
+                      isRequired
+                    />
+                    <Input
+                      label="回调标识"
+                      placeholder="company-sso"
+                      value={providerId}
+                      onChange={(value) =>
+                        setProviderId(
+                          value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
+                        )
+                      }
+                      inputDir="ltr"
+                      hint={`回调地址：${callbackPath(providerId || 'your-id')}`}
+                      isRequired
+                    />
+                    <Input
+                      label="Issuer"
+                      placeholder="https://id.example.com"
+                      value={issuer}
+                      onChange={setIssuer}
+                      inputDir="ltr"
+                      hint="会自动拼接 /.well-known/openid-configuration"
+                      isRequired
+                    />
+                  </>
+                ) : null}
                 <Input
                   label="Client ID"
                   value={clientId}
@@ -442,17 +508,6 @@ function AddMethodModal({
                   hint="保存后不可回显"
                   isRequired
                 />
-                {selected === 'oidc' ? (
-                  <Input
-                    label="Issuer"
-                    placeholder="https://id.example.com"
-                    value={issuer}
-                    onChange={setIssuer}
-                    inputDir="ltr"
-                    hint="会自动拼接 /.well-known/openid-configuration"
-                    isRequired
-                  />
-                ) : null}
                 <Input
                   label="Scopes（可选）"
                   placeholder="openid email profile"
@@ -495,7 +550,9 @@ function EditMethodModal({
   const [scopes, setScopes] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const meta = method ? methodMeta(method.providerId) : null
+  const meta = method ? methodMeta(method.kind) : null
+  const isOidc = method?.kind === 'oidc'
+  const providerIdForCallback = method?.providerId ?? ''
 
   useEffect(() => {
     if (!method) return
@@ -513,10 +570,9 @@ function EditMethodModal({
       data: {
         id: method.id,
         displayName: displayName.trim() || undefined,
-        clientId: clientId.trim() || null,
+        clientId: isOAuth(method.kind) ? clientId.trim() || null : undefined,
         clientSecret: secret.trim() || undefined,
-        issuer:
-          method.providerId === 'oidc' ? issuer.trim() || null : undefined,
+        issuer: isOidc ? issuer.trim() || null : undefined,
         scopes: scopes.trim() || null,
       },
     })
@@ -561,13 +617,22 @@ function EditMethodModal({
               onChange={setSecret}
               inputDir="ltr"
             />
-            {method?.providerId === 'oidc' ? (
-              <Input
-                label="Issuer"
-                value={issuer}
-                onChange={setIssuer}
-                inputDir="ltr"
-              />
+            {isOidc ? (
+              <>
+                <p className="rounded-lg bg-background-secondary-default px-3 py-2 text-caption-1-regular text-text-tertiary">
+                  回调地址：
+                  <span dir="ltr" className="text-text-secondary">
+                    {callbackPath(providerIdForCallback)}
+                  </span>
+                </p>
+                <Input
+                  label="Issuer"
+                  value={issuer}
+                  onChange={setIssuer}
+                  inputDir="ltr"
+                  hint="会自动拼接 /.well-known/openid-configuration"
+                />
+              </>
             ) : null}
             <Input
               label="Scopes（可选）"

@@ -73,9 +73,15 @@ export const siteSettings = sqliteTable('site_settings', {
   updatedBy: text('updated_by'),
 })
 
-/** 第三方登录配置；保存后需要重建 Better Auth 实例 */
+/**
+ * 第三方登录配置；保存后需要重建 Better Auth 实例。
+ * `kind` 是登录方式类型（email/google/github/oidc/passkey）；
+ * `providerId` 是运行时唯一 ID，也是回调地址段 /api/auth/callback/{providerId}。
+ * 通用 OIDC 可以有多条，各自使用自定义 providerId。
+ */
 export const authProvider = sqliteTable('auth_provider', {
   id: text('id').primaryKey(),
+  kind: text('kind').notNull().default('oidc'),
   providerId: text('provider_id').notNull().unique(),
   displayName: text('display_name').notNull(),
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
