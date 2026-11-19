@@ -22,13 +22,18 @@ import {
 } from '@/components/shell/sidebar'
 
 const NAV = [
-  { to: '/admin', label: '概览', icon: RiShieldKeyholeLine, exact: true },
+  { to: '/admin', label: '管理概览', icon: RiShieldKeyholeLine, exact: true },
   { to: '/admin/site', label: '站点信息', icon: RiSettings4Line, exact: false },
-  { to: '/admin/domains', label: '域名', icon: RiGlobalLine, exact: false },
+  {
+    to: '/admin/domains',
+    label: '域名管理',
+    icon: RiGlobalLine,
+    exact: false,
+  },
   { to: '/admin/providers', label: '服务商', icon: RiKey2Line, exact: false },
   {
     to: '/admin/auth',
-    label: '登录',
+    label: '登录设置',
     icon: RiLockPasswordLine,
     exact: false,
   },
@@ -38,8 +43,13 @@ const NAV = [
     icon: RiTelegram2Line,
     exact: false,
   },
-  { to: '/admin/users', label: '用户', icon: RiTeamLine, exact: false },
-  { to: '/admin/logs', label: '日志', icon: RiTerminalBoxLine, exact: false },
+  { to: '/admin/users', label: '用户管理', icon: RiTeamLine, exact: false },
+  {
+    to: '/admin/logs',
+    label: '系统日志',
+    icon: RiTerminalBoxLine,
+    exact: false,
+  },
 ] as const
 
 function AdminNav({ onNavigate }: { onNavigate?: () => void }) {
