@@ -11,9 +11,9 @@ x-api-key: asms_xxx
 Authorization: Bearer asms_xxx
 ```
 
-- Key 以哈希存储，可设置过期时间与限流（默认 120 次/分钟）。
-- Key 创建时可绑定 `metadata.mailboxId`：发信会被强制限定到该邮箱，列邮件也会自动过滤。
-- Key 失效、被吊销或用户被封禁时返回 401/403。
+- Key 存哈希，可以设过期时间，也有限流（默认 120 次/分钟）。
+- 建 Key 时能绑一个 `metadata.mailboxId`：之后发信只能从这个邮箱出，列邮件也自动只看它。
+- Key 过期、被吊销，或者用户被封禁，分别返回 401 / 403。
 
 ## 2. 发信
 
@@ -124,7 +124,7 @@ Authorization: Bearer asms_xxx
 
 ## 5. 错误码
 
-统一结构：
+出错时一律是这个形状，前端可以直接按 `code` 分支：
 
 ```json
 {

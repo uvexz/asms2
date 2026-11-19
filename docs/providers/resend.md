@@ -2,11 +2,12 @@
 
 ## 1. 边界
 
-asms2 把 Resend 当作**发件网关 + 收件代收方**：
+Resend 是这套适配层最早对接的一家，也是唯一用官方 SDK 的（其余六家都是手写 HTTP）。代码在 `src/server/providers/resend.ts`：
 
-- 发件：调用 `POST /emails`，`from` 必须是该账号下已验证的域名。
-- 收件：域名 MX 指向 Resend，Resend 收下后推送 `email.received` Webhook；**Webhook 只有元数据**，正文要再调 Receiving API 拉取。
-- 因此本项目没有 SMTP/IMAP，也无法在投递阶段拒收（详见 [architecture.md](../architecture.md#1-定位与边界)）。
+- 发件：`POST /emails`，`from` 必须是该账号下已验证的域名。
+- 收件：域名 MX 指向 Resend，它收下后推 `email.received`；**Webhook 只有元数据**，正文得再调 Receiving API 拉一次。
+- `custom` 那一档复用这份实现，只换基地址，用来接自建的 Resend 协议网关。
+- 边界上的事（为什么没有 SMTP/IMAP、为什么退不了信）在 [architecture.md](../architecture.md#1-定位与边界)，这里不重复。
 
 ## 2. 接入步骤
 

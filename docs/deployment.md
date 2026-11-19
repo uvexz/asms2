@@ -31,10 +31,10 @@ bun run build
 node .output/server/index.mjs
 ```
 
-- 构建产物是自包含 Node 服务（Nitro `node-server` preset），默认监听 3000。
-- Node ≥ 20；`better-sqlite3` 已移除，无需编译原生模块（libSQL 自带绑定）。
-- 健康检查建议请求 `/login`（走 SSR 与数据库），不要只探端口。
-- **首次上线后，管理员应注册 `admin@<域名>` 长期邮箱**：`postmaster`、`abuse`、`noreply` 等保留前缀的来信会统一转投到同域名的 `admin@`，用于接收功能与职能邮件；不创建则这些来信会按 unrouted 处理。
+- 构建出来是个自包含的 Node 服务（Nitro `node-server`），默认监听 3000。
+- Node ≥ 20 就行。`better-sqlite3` 早就移掉了，不用编译原生模块，libSQL 自带绑定。
+- 健康检查别只探端口，请求 `/login` 更有意义——它要过 SSR 和数据库。
+- **上线后第一件事：让管理员注册 `admin@<域名>` 长期邮箱**。`postmaster`、`abuse`、`noreply` 这些保留前缀的来信会统一转投到它，用来接功能和职能邮件；不建，这些信就按 unrouted 处理了。
 
 ## 3. Nginx 反向代理
 
@@ -106,14 +106,14 @@ turso db dump <db-name> > backup-$(date +%F).sql
 
 常见问题：
 
-| 现象             | 排查顺序                                                                                                                |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| 收不到邮件       | 域名 verified → `dig MX` 是否指向 Resend（优先级 10）→ Resend Webhook 是否触发 → 后台 Webhook 日志 → 是否会写进了墓碑表 |
-| 发件 403         | `from` 域名是否与已验证域名完全一致；是否用了 `resend.dev` 沙箱地址                                                     |
-| 发件 502         | 服务商 Key 是否有效；后台服务商状态；Resend 日志                                                                        |
-| 登录后立刻掉线   | `BETTER_AUTH_URL` 与访问域名是否一致；Cookie 是否被代理丢弃                                                             |
-| 第三方登录报错   | 回调地址是否为 `{BETTER_AUTH_URL}/api/auth/callback/{provider}`；保存后是否等足 30–60s                                  |
-| Passkey 无法使用 | `BETTER_AUTH_URL` 必须是 `https://` 正式域名（本机 localhost 除外），且与浏览器访问地址完全一致                         |
+| 现象             | 排查顺序                                                                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 收不到邮件       | 域名是否 verified → `dig MX` 有没有指向服务商给的地址（优先级 10）→ 服务商侧 Webhook 是否触发 → 后台 Webhook 日志 → 是不是写进墓碑表了 |
+| 发件 403         | `from` 域名和已验证域名是否完全一致；是不是还在用沙箱地址（Resend 的 `resend.dev`）                                                    |
+| 发件 502         | 服务商 Key 是否还有效；后台服务商状态；服务商控制台里的发信日志                                                                        |
+| 登录后立刻掉线   | `BETTER_AUTH_URL` 与访问域名是否一致；Cookie 是否被代理丢弃                                                                            |
+| 第三方登录报错   | 回调地址是否为 `{BETTER_AUTH_URL}/api/auth/callback/{provider}`；保存后是否等足 30–60s                                                 |
+| Passkey 无法使用 | `BETTER_AUTH_URL` 必须是 `https://` 正式域名（本机 localhost 除外），且与浏览器访问地址完全一致                                        |
 
 ### 缓存与多实例
 
@@ -127,7 +127,7 @@ turso db dump <db-name> > backup-$(date +%F).sql
 
 - [ ] 环境变量齐全，`SECRET_ENCRYPTION_KEY` 已备份到密钥管理
 - [ ] 已执行 `db:migrate`，并验证 `/login` 可打开
-- [ ] 已添加 Resend Key、域名验证通过、Webhook 有事件
+- [ ] 已加服务商 Key、域名验证通过、Webhook 收到过事件
 - [ ] 管理员已注册 `admin@` 邮箱，保留前缀（`postmaster`、`abuse`、`noreply` 等）来信可正常转投
 - [ ] `CRON_SECRET` 已配置，cron 每分钟命中且日志正常
 - [ ] 已用真实地址完成一次"收件 + 发件"闭环

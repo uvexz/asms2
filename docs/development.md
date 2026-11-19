@@ -58,7 +58,7 @@ routes / components → server/fns → server/{mail,webhooks,jobs} → providers
 | `fns/mail.ts`  | `listMailboxesFn`、`createMailboxFn`、`removeMailboxFn`、`listDomainsFn`、`listMessagesFn`、`getMessageFn`、`updateMessageFn`、`sendMailFn`、`getQuotaFn` |
 | `fns/admin.ts` | `adminOverviewFn`、站点读写、域名 CRUD/验证、服务商 CRUD、Webhook CRUD、登录配置、用户管理、审计/事件/墓碑查询                                            |
 
-统一约定：入参 zod 校验，返回 `attempt()` 包裹的 `{ ok, data | error }`，首行 `requireUser()` / `requireAdmin()`。
+每个函数模样都一样：入参过 zod，首行 `requireUser()` 或 `requireAdmin()`，返回 `attempt()` 包过的 `{ ok, data | error }`。不这么写，前端那套 `unwrap()` 就接不住。
 
 ## 5. 常见改动
 
@@ -83,14 +83,14 @@ routes / components → server/fns → server/{mail,webhooks,jobs} → providers
 
 **改数据模型**
 
-见 [database.md](./database.md#2-迁移流程)。记住：不删列、必须人工检查生成的 SQL、需要回填写进迁移。
+先看 [database.md](./database.md#2-迁移流程)。三件事别忘：不删列、生成的 SQL 必须自己看一遍、要回填就手写进迁移文件。
 
 ## 6. 代码约定
 
-- TypeScript strict + `verbatimModuleSyntax`：类型导入必须 `import type`；未使用变量会报错。
-- 服务端查询必须显式带 `userId`；跨资源操作先校验归属。
-- 时间存秒；ID 用 nanoid；错误用 `AppError`（带 `code`/`status`）。
-- 日志不要打印密钥、完整邮件正文、用户 token。
+- TypeScript strict + `verbatimModuleSyntax`：类型导入一律 `import type`，留着没用的变量会直接报错。
+- 服务端查询必须显式带 `userId`，跨资源操作先校验归属。漏一个就算 bug，不算疏忽。
+- 时间存秒，ID 用 nanoid，错误统一抛 `AppError`（带 `code` 和 `status`）。
+- 日志里不准出现密钥、完整正文、用户 token。
 
 ## 7. UI 约定
 

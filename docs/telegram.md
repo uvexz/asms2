@@ -123,11 +123,11 @@ curl -s "https://api.telegram.org/bot<TOKEN>/getWebhookInfo" | jq
 ## 8. 与收件链路的关系
 
 ```
-Resend Webhook → processWebhook（验签/去重）→ ingestInbound（入库）
-                                                   └→ notifyInboundMessage（best-effort）
+服务商 Webhook → processWebhook（验签/去重）→ ingestInbound（入库）
+                                                └→ notifyInboundMessage（best-effort）
 ```
 
-- 通知在 `db.batch` 成功、计数更新之后触发，且**不 await**：不会拖慢 Resend 回调，也不会因为失败让 Resend 收到 5xx。
-- 推送依赖常驻 Node 进程在响应后继续执行；若部署到会在响应后冻结的 serverless 平台，需要改成队列。
-- 一封邮件命中多个本站地址时，仍只投第一个邮箱，推送也只针对该邮箱。
+- 推送在 `db.batch` 成功、计数更新之后才发，而且**不 await**。所以它既拖不慢服务商回调，失败了也不会让服务商收到 5xx 去重试。
+- 这个"响应之后再干点活"依赖常驻 Node 进程。部署到响应即冻结的 serverless 上，得改成队列。
+- 一封邮件命中多个本站地址时只投第一个邮箱，推送也只针对那一个。
 - 临时邮箱在考察期内收到首封邮件时，先完成「永久保留」的更新，再推送，因此推送里的有效期文案不会误导。

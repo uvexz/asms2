@@ -61,13 +61,13 @@ WHERE kind = 'temp' AND last_received_at IS NOT NULL
 
 ## 4. 字段约定
 
-| 项   | 约定                                                                  |
-| ---- | --------------------------------------------------------------------- |
-| 时间 | `integer(..., { mode: 'timestamp' })`，存 Unix **秒**；API 输出毫秒   |
-| 主键 | `text`，nanoid（20 位）                                               |
-| 布尔 | `integer({ mode: 'boolean' })`                                        |
-| 枚举 | `text` + TS 联合类型（SQLite 无原生 enum）                            |
-| JSON | `text`，字段名以 `Json` 结尾，读取时 `JSON.parse`                     |
+| 项   | 约定                                                                                                                   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------- |
+| 时间 | `integer(..., { mode: 'timestamp' })`，存 Unix **秒**；API 输出毫秒                                                    |
+| 主键 | `text`，nanoid（20 位）                                                                                                |
+| 布尔 | `integer({ mode: 'boolean' })`                                                                                         |
+| 枚举 | `text` + TS 联合类型（SQLite 无原生 enum）                                                                             |
+| JSON | `text`，字段名以 `Json` 结尾，读取时 `JSON.parse`                                                                      |
 | 软删 | `status='deleted'` + `deletedAt`；地址改写为 `原地址#id` 释放唯一索引；邮件立即隐藏，保留期与冷却期后由 sweep 分块硬删 |
 
 ## 5. 关键索引
@@ -84,7 +84,7 @@ WHERE kind = 'temp' AND last_received_at IS NOT NULL
 - `webhook_event(endpoint_id, provider_event_id)` UNIQUE：重复事件去重。
 - `unrouted_message(provider_message_id)`：墓碑查重。
 
-新增查询前先看现有索引；列表类查询避免 `SELECT *` 带出 `message_body`。
+加查询之前先翻一眼现有索引，八成已经有能用的。另外列表查询别随手 `SELECT *`——`message_body` 会被一起拖出来，列表立刻慢一个量级。
 
 ## 6. 本地重建
 
