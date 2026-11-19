@@ -2,12 +2,18 @@ import '#/server/env'
 
 import { db } from '#/db/client'
 import { authProvider } from '#/db/schema'
+import { canSendSystemMail } from '#/server/mail/system'
 import { getSiteSettings } from '#/server/settings'
 
 export type SocialProviderId = 'google' | 'github' | 'oidc'
 
 export interface PublicLoginConfig {
-  emailPassword: { enabled: boolean; verificationRequired: boolean }
+  emailPassword: {
+    enabled: boolean
+    verificationRequired: boolean
+    /** 是否已配置可发信的服务商与域名；未配置时验证/重置邮件发不出去 */
+    canSend: boolean
+  }
   social: { providerId: SocialProviderId; displayName: string }[]
   passkey: { enabled: boolean }
 }
@@ -26,9 +32,10 @@ export async function getPublicLoginConfig(): Promise<PublicLoginConfig> {
 
   const task = (async () => {
     // 取全部行：停用的邮箱密码方式也要能读到，避免误判为默认开启
-    const [rows, settings] = await Promise.all([
+    const [rows, settings, canSend] = await Promise.all([
       db.select().from(authProvider),
       getSiteSettings(),
+      canSendSystemMail(),
     ])
     const methods = new Map(rows.map((row) => [row.providerId, row]))
     const emailRow = methods.get('email')
@@ -38,6 +45,7 @@ export async function getPublicLoginConfig(): Promise<PublicLoginConfig> {
         // 缺行表示管理员删除了邮箱密码方式
         enabled: emailRow ? emailRow.enabled : false,
         verificationRequired: settings.emailVerificationRequired,
+        canSend,
       },
       social: rows
         .filter((row) => row.enabled && SOCIAL_IDS.has(row.providerId))

@@ -15,7 +15,7 @@ import * as schema from '#/db/schema'
 import { decryptSecret } from '#/server/crypto/secret-box'
 import { getAuthConfigVersion, getSiteSettings } from '#/server/settings'
 
-import { sendVerificationEmail } from './mailer'
+import { sendPasswordResetEmail, sendVerificationEmail } from './mailer'
 
 export type AuthInstance = ReturnType<typeof betterAuth>
 
@@ -122,6 +122,24 @@ async function buildAuth(): Promise<AuthInstance> {
       minPasswordLength: 8,
       autoSignIn: true,
       requireEmailVerification: false,
+      resetPasswordTokenExpiresIn: 60 * 60,
+      revokeSessionsOnPasswordReset: true,
+      // 未启用邮箱密码登录时不注册发送器，重置接口会直接返回禁用
+      sendResetPassword: emailEnabled
+        ? async ({ user, url }: { user: { email: string }; url: string }) => {
+            const current = await getSiteSettings()
+            try {
+              await sendPasswordResetEmail({
+                siteName: current.siteName,
+                to: user.email,
+                url,
+              })
+            } catch (error) {
+              // 发信失败不能把账号是否存在暴露给请求方，只记录日志
+              console.error('[asms2] password reset email failed:', error)
+            }
+          }
+        : undefined,
     },
     emailVerification: {
       sendOnSignUp: true,

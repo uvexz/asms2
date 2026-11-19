@@ -161,6 +161,7 @@ function LoginPage() {
           }
           onSubmit={handleSubmit}
           switchHref="/register"
+          forgotHref="/forgot-password"
           centered
           className="w-full max-w-[420px]"
           footnote={

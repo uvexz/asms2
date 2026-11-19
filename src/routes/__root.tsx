@@ -50,7 +50,11 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
     const [site, auth] = await Promise.all([
       getPublicSiteFn().catch(() => null),
       getPublicLoginConfigFn().catch(() => ({
-        emailPassword: { enabled: false, verificationRequired: false },
+        emailPassword: {
+          enabled: false,
+          verificationRequired: false,
+          canSend: false,
+        },
         social: [],
         passkey: { enabled: false },
       })),

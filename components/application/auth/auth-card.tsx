@@ -110,6 +110,8 @@ export interface AuthCardProps {
   onProvider?: (provider: SocialProvider) => void;
   /** Footer link target, e.g. to the opposite mode. */
   switchHref?: string;
+  /** Target of the sign-in card's "Forgot password?" link. */
+  forgotHref?: string;
   /**
    * Heading level for the card title. Defaults to `1`, because on a real
    * sign-in screen the card *is* the page. Drop it to `2`+ wherever the card
@@ -166,6 +168,7 @@ export function AuthCard({
   onSubmit,
   onProvider,
   switchHref = "#",
+  forgotHref = "#",
   headingLevel = 1,
   className,
 }: AuthCardProps) {
@@ -330,7 +333,7 @@ export function AuthCard({
             <Checkbox size="sm" isSelected={remember} onChange={setRemember}>
               Remember me
             </Checkbox>
-            <LinkButton href="#">Forgot password?</LinkButton>
+            <LinkButton href={forgotHref}>Forgot password?</LinkButton>
           </div>
         )}
 

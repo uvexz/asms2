@@ -15,7 +15,11 @@ export const getPublicLoginConfigFn = createServerFn({
     return await getPublicLoginConfig()
   } catch {
     return {
-      emailPassword: { enabled: false, verificationRequired: false },
+      emailPassword: {
+        enabled: false,
+        verificationRequired: false,
+        canSend: false,
+      },
       social: [],
       passkey: { enabled: false },
     }
