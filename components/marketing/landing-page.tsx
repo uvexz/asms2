@@ -232,15 +232,15 @@ export function LandingPage({ site, signedIn }: LandingPageProps) {
               className="landing-enter text-display-3-medium tracking-[-0.02em] text-text-primary md:text-display-2-medium"
               style={{ animationDelay: '40ms' }}
             >
-              <span className="block">收到一封信，</span>
-              <span className="block">临时地址就留下。</span>
+              <span className="block">简单收发件，</span>
+              <span className="block">你的简单邮箱专家。</span>
             </h1>
 
             <p
               className="landing-enter mt-6 max-w-[34rem] text-balance text-title-3-regular leading-relaxed text-text-primary"
               style={{ animationDelay: '120ms' }}
             >
-              {`${siteName} 把收发都放在网页里：临时地址不限量，长期地址按配额给。临时地址创建后有${ttl}考察期，收到任意一封邮件就永久保留；一封都没收到，就作废，不复活。`}
+              {`${siteName} 的收发都在网页里，不用装客户端。临时地址不限量，长期地址按配额给：开好后${ttl}内，收到任意一封邮件就永久保留；一封都没等到，就作废。`}
             </p>
 
             <div
@@ -288,7 +288,7 @@ export function LandingPage({ site, signedIn }: LandingPageProps) {
             copy={
               <>
                 <p>
-                  临时地址创建后开始计时。这段时间里收到任意一封邮件——验证码、账单、推广都算——它就永久保留，计时器当天消失。
+                  临时地址创建后开始计时。这段时间里收到任意一封邮件——验证码、账单、推广都算——它就直接转正，计时器当场消失。
                 </p>
                 <p>一封都没收到，地址作废——不续期，不复活，也不重新分配。</p>
               </>
