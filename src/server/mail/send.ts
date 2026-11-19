@@ -4,10 +4,12 @@ import { customAlphabet } from 'nanoid'
 import { db } from '#/db/client'
 import { attachment, mailbox, message, messageBody } from '#/db/schema'
 import { AppError } from '#/server/errors'
-import { ProviderError, type OutboundMessage } from '#/server/providers'
+import { ProviderError } from '#/server/providers'
+import type { OutboundMessage } from '#/server/providers'
 import type { SessionUser } from '#/server/auth/guards'
 import { getSiteSettings } from '#/server/settings'
-import { parseAddressList, type ParsedAddress } from '#/lib/email-address'
+import { parseAddressList } from '#/lib/email-address'
+import type { ParsedAddress } from '#/lib/email-address'
 
 import { makeSnippet, textToHtml } from './content'
 import { getMailboxOrThrow } from './mailbox'
@@ -110,7 +112,7 @@ export async function sendMail(user: SessionUser, input: SendMailInput) {
   const outbound: OutboundMessage = {
     from: {
       address: box.address,
-      name: box.displayName ?? user.name ?? undefined,
+      name: box.displayName ?? user.name,
     },
     to,
     cc,
@@ -157,7 +159,7 @@ export async function sendMail(user: SessionUser, input: SendMailInput) {
       providerMessageId,
       internetMessageId: null,
       threadKey: null,
-      fromName: box.displayName ?? user.name ?? null,
+      fromName: box.displayName ?? user.name,
       fromAddress: box.address,
       toJson: JSON.stringify(to.map((item) => item.address)),
       ccJson: cc.length ? JSON.stringify(cc.map((item) => item.address)) : null,

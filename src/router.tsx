@@ -3,7 +3,7 @@ import { routeTree } from './routeTree.gen'
 
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query'
 
-import { ButtonLink } from '@/components/base/buttons/button'
+import { ButtonLink } from '#/components/base/buttons/button'
 import { getContext } from './integrations/tanstack-query/root-provider'
 
 export function getRouter() {

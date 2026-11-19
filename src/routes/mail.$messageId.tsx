@@ -1,8 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 
-import { MessageList } from '@/components/mail/message-list'
-import { MessageReader } from '@/components/mail/message-reader'
+import { MessageList } from '#/components/mail/message-list'
+import { MessageReader } from '#/components/mail/message-reader'
 import { mailboxesQuery } from '#/lib/api'
 
 export const Route = createFileRoute('/mail/$messageId')({
@@ -16,10 +16,7 @@ function MessageDetail() {
   return (
     <>
       <MessageList selectedId={messageId} />
-      <MessageReader
-        messageId={messageId}
-        mailboxes={mailboxes.data ?? []}
-      />
+      <MessageReader messageId={messageId} mailboxes={mailboxes.data ?? []} />
     </>
   )
 }

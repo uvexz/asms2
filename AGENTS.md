@@ -8,7 +8,7 @@ This project uses BoardUI (React + Tailwind CSS v4, source-owned components unde
 
 - Before hand-building any UI element, check for an installed BoardUI component under `components/base/` and `components/application/`, and prefer it.
 - Missing a component? Install it (BoardUI MCP `install_components`, or `npx boardui@latest add <name>`) instead of writing a lookalike.
-- Import through the `@/` alias, e.g. `import { Button } from "@/components/base/buttons/button"`.
+- Import through the aliases configured in `boardui.json`, e.g. `import { Button } from "#/components/base/buttons/button"`.
 
 ## Color: semantic tokens only
 
@@ -32,12 +32,12 @@ This project uses BoardUI (React + Tailwind CSS v4, source-owned components unde
 
 ## Mechanics
 
-- Direction: wrap the app (or a mixed-language region) in `DirectionProvider` from `@/components/foundations/direction/direction`, with an explicit BCP 47 `locale` (`ar`, `he`, `en-US`, `zh-CN`). Set matching `lang` and `dir` on `<html>` for full-app RTL. CSS `dir` alone does not configure React Aria keyboard navigation or portal placement. Use `useDirection()` for custom interactions and put its value on custom portal roots.
+- Direction: wrap the app (or a mixed-language region) in `DirectionProvider` from `#/components/foundations/direction/direction`, with an explicit BCP 47 `locale` (`ar`, `he`, `en-US`, `zh-CN`). Set matching `lang` and `dir` on `<html>` for full-app RTL. CSS `dir` alone does not configure React Aria keyboard navigation or portal placement. Use `useDirection()` for custom interactions and put its value on custom portal roots.
 - Use logical styles: `ms`/`me`, `ps`/`pe`, `start`/`end`, `text-start`/`text-end`, `border-s`/`border-e`, `rounded-s`/`rounded-e`, and inline logical CSS properties. Mirror navigation/disclosure glyphs and horizontal drawer motion in RTL. Preserve physical coordinates for measured geometry, charts, canvas, and decorative art. Keep code, OTP digits, email addresses and URLs in explicit LTR regions; isolate mixed text with `<bdi>` or `dir="auto"`. Translating labels and formatting application data is separate from layout direction. See https://www.boardui.com/rtl.
 
-- Internal vertical scroll regions must soften the top edge with a progressive blur and surface fade once scrolled, rather than sharply clipping content. Keep headers outside the scroll region. Use a stationary, `pointer-events-none`, `aria-hidden` overlay in a relative wrapper: a 24px masked 1px backdrop blur, a 16px masked 4px backdrop blur, and a gradient from the enclosing semantic surface token to transparent. Ramp each layer's opacity from 0 to 1 over the first 24px of scrolling; keep it invisible at scrollTop 0. Apply opacity to the individual layers, never the overlay parent (a translucent parent creates a backdrop root and can break blur at normal browser zoom). Verify top/reset, overflow, light/dark mode, and 100% zoom; preserve keyboard scrolling and do not blur the whole content area. The `scroll-fade` registry item ships this recipe as `ScrollFade` + `useScrollFade` (`@/components/foundations/scroll-fade/scroll-fade`); reuse it rather than rebuilding the layers.
+- Internal vertical scroll regions must soften the top edge with a progressive blur and surface fade once scrolled, rather than sharply clipping content. Keep headers outside the scroll region. Use a stationary, `pointer-events-none`, `aria-hidden` overlay in a relative wrapper: a 24px masked 1px backdrop blur, a 16px masked 4px backdrop blur, and a gradient from the enclosing semantic surface token to transparent. Ramp each layer's opacity from 0 to 1 over the first 24px of scrolling; keep it invisible at scrollTop 0. Apply opacity to the individual layers, never the overlay parent (a translucent parent creates a backdrop root and can break blur at normal browser zoom). Verify top/reset, overflow, light/dark mode, and 100% zoom; preserve keyboard scrolling and do not blur the whole content area. The `scroll-fade` registry item ships this recipe as `ScrollFade` + `useScrollFade` (`#/components/foundations/scroll-fade/scroll-fade`); reuse it rather than rebuilding the layers.
 
-- Merge classes with `cx()` from `@/utils/cx` (tailwind-merge aware of BoardUI's composite text styles). No string concatenation, no plain `clsx`.
+- Merge classes with `cx()` from `#/utils/cx` (tailwind-merge aware of BoardUI's composite text styles). No string concatenation, no plain `clsx`.
 - Icons come from `@remixicon/react`, passed as component references (`leadingIcon={RiAddLine}`), not rendered elements.
 - Form components build on `react-aria-components`; extend the installed BoardUI form components rather than raw `<input>`/`<select>`.
 - Focus states: `outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring`.
@@ -59,8 +59,10 @@ When unsure about a token, a component's API, or working example code, ask the B
 ## 2. 目录与依赖方向
 
 ```
-routes / components  →  server/fns  →  server/{mail,webhooks,jobs,telegram}  →  providers / db
+src/routes / src/components  →  server/fns  →  server/{mail,webhooks,jobs,telegram}  →  providers / db
 ```
+
+- 前端代码全部在 `src/` 下：`src/components`（BoardUI 源码 + 业务组件）、`src/styles`（主题与排版 token）、`src/utils`（`cx` 等）。仓库根不再有这三类目录。
 
 - 禁止反向依赖：service 不 import 路由；adapter 不 import service、不读数据库、不读环境变量（运行时配置由调用方传入）。
 - 新增服务商 = 在 `src/server/providers/` 实现 `MailProvider` + 在 `index.ts` 注册，业务层不得出现 `if (kind === 'resend')`。
@@ -69,7 +71,9 @@ routes / components  →  server/fns  →  server/{mail,webhooks,jobs,telegram} 
 
 ## 3. 别名与导入
 
-- `#/*` → `src/*`（业务代码）；`@/*` → 仓库根（BoardUI 的 `components/`、`utils/`）。
+- `#/*` → `src/*`，**唯一别名**。业务代码与 BoardUI 源码共用它：`#/components/...`、`#/components/base/...`、`#/utils/cx`、`#/styles/globals.css`。不再有 `@/*`。
+- BoardUI 的落盘位置和别名由根目录 `boardui.json` 的 `paths` / `aliases` 声明（`components`→`src/components`、`utils`→`src/utils`、`styles`→`src/styles`）。`boardui add` 会自动按它写入并改写 import 前缀，**不要用 `--path` / `--dir` 覆盖**，否则文件会落回根目录。
+- `styles.css` 是 Vite 入口样式（被 `__root.tsx` 以 `?url` 引入），BoardUI 的 token 在其 `@import './styles/globals.css'` 之后生效。
 - 服务端函数按域拆分：`fns/site.ts`、`fns/mail.ts`、`fns/admin.ts`；返回值统一 `attempt()` 包装的 `{ ok, data | error }`。
 - 类型只在编译期使用时必须 `import type`（`verbatimModuleSyntax: true`）。
 

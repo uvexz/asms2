@@ -26,7 +26,11 @@ const registry: Record<ProviderKind, MailProvider> = {
 }
 
 export function getProvider(kind: ProviderKind): MailProvider {
-  return registry[kind] ?? registry.resend
+  // kind 来自数据库，运行时不保证落在联合类型内；缺表时回落到 resend。
+  return (
+    (registry as Record<string, MailProvider | undefined>)[kind] ??
+    registry.resend
+  )
 }
 
 export function listProviders(): MailProvider[] {

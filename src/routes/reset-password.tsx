@@ -3,10 +3,10 @@ import type { FormEvent } from 'react'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { RiLockPasswordLine } from '@remixicon/react'
 
-import { Button } from '@/components/base/buttons/button'
-import { Input } from '@/components/base/input/input'
-import { toast } from '@/components/base/toast/toast'
-import { ThemeCorner } from '@/components/application/theme/theme-corner'
+import { Button } from '#/components/base/buttons/button'
+import { Input } from '#/components/base/input/input'
+import { toast } from '#/components/base/toast/toast'
+import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
 
 export const Route = createFileRoute('/reset-password')({

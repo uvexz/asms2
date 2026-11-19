@@ -13,11 +13,13 @@ import { encryptSecret } from '#/server/crypto/secret-box'
 import { createMailbox, listMailboxes } from '#/server/mail/mailbox'
 
 async function main() {
-  const admin = (await db.select().from(user).limit(1))[0]
-  if (!admin) throw new Error('no user')
+  const admins = await db.select().from(user).limit(1)
+  const admin = admins[0]
+  if (admins.length === 0) throw new Error('no user')
 
-  let config = (await db.select().from(providerConfig).limit(1))[0]
-  if (!config) {
+  const configs = await db.select().from(providerConfig).limit(1)
+  let config = configs[0]
+  if (configs.length === 0) {
     const id = 'demo-provider'
     await db.insert(providerConfig).values({
       id,
@@ -33,8 +35,9 @@ async function main() {
     config = (await db.select().from(providerConfig).limit(1))[0]
   }
 
-  let dom = (await db.select().from(domain).limit(1))[0]
-  if (!dom) {
+  const domains = await db.select().from(domain).limit(1)
+  let dom = domains[0]
+  if (domains.length === 0) {
     await db.insert(domain).values({
       id: 'demo-domain',
       hostname: 'demo.asms2.local',

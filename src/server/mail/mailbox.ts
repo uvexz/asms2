@@ -139,7 +139,7 @@ export async function getMailboxOrThrow(
       .from(mailbox)
       .where(and(eq(mailbox.id, mailboxId), eq(mailbox.userId, userId)))
       .limit(1)
-  )[0]
+  ).at(0)
 
   if (!row || row.status === 'deleted') {
     throw new AppError('not_found', '邮箱不存在', 404)
@@ -179,7 +179,7 @@ async function resolveDomain(kind: MailboxKind, domainId: string | undefined) {
     )
     .limit(1)
 
-  const found = rows[0]
+  const found = rows.at(0)
   if (!found) {
     throw new AppError(
       'validation_failed',
@@ -272,7 +272,7 @@ export async function createMailbox(
         ),
       )
       .limit(1)
-  )[0]
+  ).at(0)
   if (tombstone) {
     throw new AppError('address_taken', '该地址刚被释放，冷却期内不可注册', 409)
   }

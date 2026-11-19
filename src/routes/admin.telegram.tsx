@@ -9,14 +9,14 @@ import {
   RiTelegram2Line,
 } from '@remixicon/react'
 
-import { Button } from '@/components/base/buttons/button'
-import { Chip } from '@/components/base/badges/chip'
-import { Input } from '@/components/base/input/input'
-import { Switch } from '@/components/base/switch/switch'
-import { Spinner } from '@/components/base/spinner/spinner'
-import { toast } from '@/components/base/toast/toast'
-import { ErrorState } from '@/components/application/errors/error-state'
-import { KeyValue, PageSection } from '@/components/admin/ui'
+import { Button } from '#/components/base/buttons/button'
+import { Chip } from '#/components/base/badges/chip'
+import { Input } from '#/components/base/input/input'
+import { Switch } from '#/components/base/switch/switch'
+import { Spinner } from '#/components/base/spinner/spinner'
+import { toast } from '#/components/base/toast/toast'
+import { ErrorState } from '#/components/application/errors/error-state'
+import { KeyValue, PageSection } from '#/components/admin/ui'
 import { formatDateTime, unwrap } from '#/lib/api'
 import {
   adminDeleteTelegramWebhookFn,

@@ -6,10 +6,10 @@ import {
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 
-import { DirectionProvider } from '@/components/foundations/direction/direction'
-import { Toaster } from '@/components/base/toast/toast'
-import { RouteErrorState } from '@/components/application/errors/error-state'
-import { THEME_INIT_SCRIPT } from '@/components/application/theme/theme-init'
+import { DirectionProvider } from '#/components/foundations/direction/direction'
+import { Toaster } from '#/components/base/toast/toast'
+import { RouteErrorState } from '#/components/application/errors/error-state'
+import { THEME_INIT_SCRIPT } from '#/components/application/theme/theme-init'
 import { getPublicSiteFn } from '#/server/fns/site'
 import { sessionQuery } from '#/lib/api'
 

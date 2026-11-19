@@ -22,26 +22,20 @@ export async function authenticateApiKey(
   }
 
   const auth = await getAuth()
-  const result = (await (
+  const result = await (
     auth.api as unknown as {
-      verifyApiKey: (input: {
-        body: { key: string }
-      }) => Promise<{
+      verifyApiKey: (input: { body: { key: string } }) => Promise<{
         valid?: boolean
         error?: { message?: string }
         key?: { referenceId?: string; metadata?: unknown }
       }>
     }
-  ).verifyApiKey({ body: { key } })) as {
-    valid?: boolean
-    error?: { message?: string }
-    key?: { referenceId?: string; metadata?: unknown }
-  }
+  ).verifyApiKey({ body: { key } })
 
-  if (!result?.valid || !result.key?.referenceId) {
+  if (!result.valid || !result.key?.referenceId) {
     throw new AppError(
       'unauthorized',
-      result?.error?.message ?? 'API Key 无效',
+      result.error?.message ?? 'API Key 无效',
       401,
     )
   }
@@ -52,7 +46,7 @@ export async function authenticateApiKey(
       .from(user)
       .where(eq(user.id, result.key.referenceId))
       .limit(1)
-  )[0]
+  ).at(0)
 
   if (!row || row.banned) {
     throw new AppError('forbidden', '账号不可用', 403)

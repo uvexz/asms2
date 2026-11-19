@@ -17,11 +17,12 @@ bun run lint           # eslint
 ## 2. 目录
 
 ```
-components/
-  base/ application/    # BoardUI 源码组件（CLI 安装，不手改）
-  mail/ admin/          # 业务组合件
-utils/                  # cx、directional-icon（BoardUI 约定）
 src/
+  components/
+    base/ application/  # BoardUI 源码组件（CLI 安装，不手改）
+    mail/ admin/        # 业务组合件
+  styles/               # theme.css（token）、typography.css、globals.css
+  utils/                # cx、directional-icon（BoardUI 约定）
   db/client.ts          # libSQL + Drizzle
   db/schema/            # auth / mailbox / provider / settings / ops
   server/
@@ -38,12 +39,12 @@ drizzle/                # 迁移（提交）
 scripts/seed-demo.ts    # 仅本地演示
 ```
 
-**别名**：`#/` → `src/`；`@/` → 仓库根。服务端模块不得进入客户端 bundle。
+**别名**：只有 `#/` → `src/`，业务代码与 BoardUI 共用。落盘位置由根目录 `boardui.json` 声明（`components`/`utils`/`styles` 均在 `src/` 下），不要用 `--path` 覆盖。服务端模块不得进入客户端 bundle。
 
 ## 3. 依赖方向
 
 ```
-routes / components → server/fns → server/{mail,webhooks,jobs} → providers / db
+src/routes / src/components → server/fns → server/{mail,webhooks,jobs} → providers / db
 ```
 
 - adapter 不读数据库、不读 env；运行时配置由 service 解密后传入。
@@ -73,7 +74,7 @@ routes / components → server/fns → server/{mail,webhooks,jobs} → providers
 
 1. `src/routes/…` 新建文件；`/admin` 下的页面由 `admin.tsx` 的守卫覆盖。
 2. 会话在 root `beforeLoad` 注入 context，子路由用 `Route.useRouteContext()`。
-3. UI 先找 `components/` 里的 BoardUI 组件。
+3. UI 先找 `src/components/` 里的 BoardUI 组件。
 
 **加一个服务商**
 
@@ -94,9 +95,9 @@ routes / components → server/fns → server/{mail,webhooks,jobs} → providers
 
 ## 7. UI 约定
 
-- 一律优先使用 `components/` 下的 BoardUI 组件；缺组件就 `npx boardui@latest add <name>`，不要手写替代品。
+- 一律优先使用 `src/components/` 下的 BoardUI 组件；缺组件就 `npx boardui@latest add <name>`，不要手写替代品。
 - 只用语义 token（`text-text-primary`、`bg-background-primary-default`）与复合排版类（`text-body-medium`），禁止裸色板与任意 hex。
-- 类名合并用 `@/utils/cx`；图标从 `@remixicon/react` 传组件引用。
+- 类名合并用 `#/utils/cx`；图标从 `@remixicon/react` 传组件引用。
 - 完整规则见根目录 [AGENTS.md](../AGENTS.md) 的 BoardUI 块。
 
 ## 8. 质量门

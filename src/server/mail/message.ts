@@ -136,7 +136,7 @@ export async function listMessages(
     // 归属校验并进 join，省掉列表请求前的一次 getMailboxOrThrow 往返
     .innerJoin(
       mailbox,
-      and(eq(mailbox.id, message.mailboxId), eq(mailbox.userId, userId))!,
+      and(eq(mailbox.id, message.mailboxId), eq(mailbox.userId, userId)),
     )
     .where(and(...conditions))
     .orderBy(desc(message.receivedAt), desc(message.id))
@@ -152,15 +152,14 @@ export async function listMessages(
     } catch {
       to = []
     }
-    const receivedAt =
-      row.receivedAt?.getTime() ?? row.createdAt.getTime() ?? Date.now()
+    const receivedAt = row.receivedAt?.getTime() ?? row.createdAt.getTime()
 
     return {
       id: row.id,
       mailboxId: row.mailboxId,
-      mailboxAddress: row.mailboxAddress ?? '',
+      mailboxAddress: row.mailboxAddress,
       direction: row.direction,
-      folder: row.folder as MessageFolder,
+      folder: row.folder,
       fromName: row.fromName,
       fromAddress: row.fromAddress,
       to,
@@ -175,7 +174,7 @@ export async function listMessages(
     }
   })
 
-  const last = items[items.length - 1]
+  const last = items.at(-1)
   // 空结果时补一次归属校验，区分「邮箱不存在」和「这个邮箱没有邮件」
   if (filters.mailboxId && items.length === 0) {
     await getMailboxOrThrow(userId, filters.mailboxId, { allowExpired: true })
@@ -209,7 +208,7 @@ export async function getMessage(
         ),
       )
       .limit(1)
-  )[0]
+  ).at(0)
 
   if (!row) throw new AppError('not_found', '邮件不存在', 404)
 
@@ -224,7 +223,7 @@ export async function getMessage(
   const m = row.message
   return {
     ...m,
-    mailboxAddress: row.mailboxAddress ?? '',
+    mailboxAddress: row.mailboxAddress,
     html: row.body?.htmlSanitized ?? null,
     text: row.body?.textBody ?? null,
     to: JSON.parse(m.toJson) as string[],

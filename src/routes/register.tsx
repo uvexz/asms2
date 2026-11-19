@@ -7,12 +7,12 @@ import {
 } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { AuthCard } from '@/components/application/auth/auth-card'
-import { LoginMethodButtons } from '@/components/application/auth/method-buttons'
-import type { LoginSocialMethod } from '@/components/application/auth/method-buttons'
-import { toast } from '@/components/base/toast/toast'
-import { TemplateCopyProvider } from '@/components/foundations/template-copy/template-copy'
-import { ThemeCorner } from '@/components/application/theme/theme-corner'
+import { AuthCard } from '#/components/application/auth/auth-card'
+import { LoginMethodButtons } from '#/components/application/auth/method-buttons'
+import type { LoginSocialMethod } from '#/components/application/auth/method-buttons'
+import { toast } from '#/components/base/toast/toast'
+import { TemplateCopyProvider } from '#/components/foundations/template-copy/template-copy'
+import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
 import { loginConfigQuery } from '#/lib/api'
 
@@ -100,7 +100,7 @@ function RegisterPage() {
       <TemplateCopyProvider translate={translateAuth}>
         <AuthCard
           mode="signup"
-          title={`加入 ${site.siteName ?? 'asms2'}`}
+          title={`加入 ${site.siteName}`}
           description={
             emailEnabled
               ? '创建账号后即可生成长期与临时邮箱'

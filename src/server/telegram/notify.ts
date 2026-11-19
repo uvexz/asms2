@@ -38,7 +38,7 @@ export async function notifyInboundMessage(messageId: string): Promise<number> {
       .innerJoin(mailbox, eq(mailbox.id, message.mailboxId))
       .where(eq(message.id, messageId))
       .limit(1)
-  )[0]
+  ).at(0)
   if (!row) return 0
 
   const links = await db
@@ -64,7 +64,7 @@ export async function notifyInboundMessage(messageId: string): Promise<number> {
       .from(messageBody)
       .where(eq(messageBody.messageId, messageId))
       .limit(1)
-  )[0]?.text
+  ).at(0)?.text
 
   const settings = await getSiteSettings()
   const text = renderInboundNotification({

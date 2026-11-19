@@ -188,45 +188,47 @@ export interface MailProvider {
   kind: ProviderKind
   capabilities: ProviderCapabilities
 
-  send(
+  send: (
     message: OutboundMessage,
     config: ProviderRuntimeConfig,
-  ): Promise<SendResult>
+  ) => Promise<SendResult>
 
-  getInbound(
+  getInbound: (
     providerMessageId: string,
     config: ProviderRuntimeConfig,
-  ): Promise<InboundContent>
+  ) => Promise<InboundContent>
 
   /**
    * 验签并归一化 Webhook。大多数服务商一次推一个事件，返回单个对象；
    * Mailtrap 这类批量推送（`events[]`）返回数组，由 processWebhook 逐个去重处理。
    */
-  verifyWebhook(
+  verifyWebhook: (
     rawBody: string,
     headers: Record<string, string>,
     config: ProviderRuntimeConfig,
-  ): VerifiedWebhookEvent | VerifiedWebhookEvent[]
+  ) => VerifiedWebhookEvent | VerifiedWebhookEvent[]
 
   /** 列出账号下已有的域名；未实现时后台不会提示导入 */
-  listDomains?(config: ProviderRuntimeConfig): Promise<ProviderDomainSummary[]>
+  listDomains?: (
+    config: ProviderRuntimeConfig,
+  ) => Promise<ProviderDomainSummary[]>
 
-  createDomain?(
+  createDomain?: (
     hostname: string,
     config: ProviderRuntimeConfig,
-  ): Promise<{
+  ) => Promise<{
     providerDomainId: string
     records: DnsRecord[]
     status: string
   }>
 
-  getDomain?(
+  getDomain?: (
     providerDomainId: string,
     config: ProviderRuntimeConfig,
-  ): Promise<{ status: string; records: DnsRecord[] }>
+  ) => Promise<{ status: string; records: DnsRecord[] }>
 
-  verifyDomain?(
+  verifyDomain?: (
     providerDomainId: string,
     config: ProviderRuntimeConfig,
-  ): Promise<void>
+  ) => Promise<void>
 }

@@ -1,6 +1,6 @@
 import { createFileRoute, getRouteApi } from '@tanstack/react-router'
 
-import { LandingPage } from '@/components/marketing/landing-page'
+import { LandingPage } from '#/components/marketing/landing-page'
 
 const rootApi = getRouteApi('__root__')
 

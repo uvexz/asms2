@@ -3,16 +3,16 @@ import { formatAddress } from '#/lib/email-address'
 import { normalizeEmailWebhook, asRecord, asString } from './email-event'
 import { requestJson, trimBaseUrl } from './http'
 import { svixSignatureKeys, verifyStandardSignature } from './signature'
-import {
-  ProviderError,
-  type DnsRecord,
-  type InboundContent,
-  type MailProvider,
-  type OutboundMessage,
-  type ProviderDomainSummary,
-  type ProviderRuntimeConfig,
-  type SendResult,
-  type VerifiedWebhookEvent,
+import { ProviderError } from './types'
+import type {
+  DnsRecord,
+  InboundContent,
+  MailProvider,
+  OutboundMessage,
+  ProviderDomainSummary,
+  ProviderRuntimeConfig,
+  SendResult,
+  VerifiedWebhookEvent,
 } from './types'
 
 const DEFAULT_BASE_URL = 'https://www.unitpost.com'

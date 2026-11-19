@@ -5,7 +5,7 @@ import {
   redirect,
 } from '@tanstack/react-router'
 
-import { AdminShell } from '@/components/admin/admin-shell'
+import { AdminShell } from '#/components/admin/admin-shell'
 
 export const Route = createFileRoute('/admin')({
   head: () => ({ meta: [{ title: '管理后台' }] }),

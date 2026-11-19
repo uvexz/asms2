@@ -26,7 +26,10 @@ function getKey(): Buffer {
 export function encryptSecret(plain: string): string {
   const iv = randomBytes(12)
   const cipher = createCipheriv(ALGO, getKey(), iv)
-  const ciphertext = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()])
+  const ciphertext = Buffer.concat([
+    cipher.update(plain, 'utf8'),
+    cipher.final(),
+  ])
   const tag = cipher.getAuthTag()
   return [
     VERSION,

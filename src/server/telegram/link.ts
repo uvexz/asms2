@@ -65,7 +65,7 @@ export async function bindChat(params: {
       .from(user)
       .where(eq(user.id, userId))
       .limit(1)
-  )[0]
+  ).at(0)
   if (!owner) return { ok: false, reason: 'user_missing' }
 
   const existing = (
@@ -74,7 +74,7 @@ export async function bindChat(params: {
       .from(telegramLink)
       .where(eq(telegramLink.chatId, chatId))
       .limit(1)
-  )[0]
+  ).at(0)
 
   if (existing && existing.userId !== userId) {
     return { ok: false, reason: 'chat_taken' }
@@ -95,7 +95,7 @@ export async function bindChat(params: {
     chatId,
     tgUserId: String(tgUser.id),
     tgUsername: tgUser.username ?? null,
-    tgFirstName: tgUser.first_name ?? null,
+    tgFirstName: tgUser.first_name,
     updatedAt: new Date(),
   }
 
@@ -123,7 +123,7 @@ export async function getLinkByChat(
         .from(telegramLink)
         .where(eq(telegramLink.chatId, chatId))
         .limit(1)
-    )[0] ?? null
+    ).at(0) ?? null
   )
 }
 

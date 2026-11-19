@@ -13,22 +13,22 @@ import {
   RiMailLine,
 } from '@remixicon/react'
 
-import { Button } from '@/components/base/buttons/button'
-import { Chip } from '@/components/base/badges/chip'
-import { Input } from '@/components/base/input/input'
+import { Button } from '#/components/base/buttons/button'
+import { Chip } from '#/components/base/badges/chip'
+import { Input } from '#/components/base/input/input'
 import {
   AlertDialog,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
-} from '@/components/base/modal/modal'
-import { Select, SelectItem } from '@/components/base/select/select'
-import { Spinner } from '@/components/base/spinner/spinner'
-import { Switch } from '@/components/base/switch/switch'
-import { toast } from '@/components/base/toast/toast'
-import { EmptyHint, PageSection } from '@/components/admin/ui'
-import { ErrorState } from '@/components/application/errors/error-state'
+} from '#/components/base/modal/modal'
+import { Select, SelectItem } from '#/components/base/select/select'
+import { Spinner } from '#/components/base/spinner/spinner'
+import { Switch } from '#/components/base/switch/switch'
+import { toast } from '#/components/base/toast/toast'
+import { EmptyHint, PageSection } from '#/components/admin/ui'
+import { ErrorState } from '#/components/application/errors/error-state'
 import { unwrap } from '#/lib/api'
 import {
   adminCreateLoginMethodFn,

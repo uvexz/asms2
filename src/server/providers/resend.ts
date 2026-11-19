@@ -3,16 +3,16 @@ import { Resend } from 'resend'
 import { formatAddress } from '#/lib/email-address'
 
 import { normalizeEmailWebhook } from './email-event'
-import {
-  ProviderError,
-  type DnsRecord,
-  type InboundContent,
-  type MailProvider,
-  type OutboundMessage,
-  type ProviderDomainSummary,
-  type ProviderRuntimeConfig,
-  type SendResult,
-  type VerifiedWebhookEvent,
+import { ProviderError } from './types'
+import type {
+  DnsRecord,
+  InboundContent,
+  MailProvider,
+  OutboundMessage,
+  ProviderDomainSummary,
+  ProviderRuntimeConfig,
+  SendResult,
+  VerifiedWebhookEvent,
 } from './types'
 
 interface ResendErrorShape {

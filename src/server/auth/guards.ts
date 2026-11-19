@@ -38,7 +38,7 @@ export async function requireUser(): Promise<SessionUser> {
   if (!session?.user) {
     throw new AppError('unauthorized', '请先登录', 401)
   }
-  return session.user as unknown as SessionUser
+  return session.user
 }
 
 export async function requireAdmin(): Promise<SessionUser> {

@@ -4,11 +4,8 @@ import { db } from '#/db/client'
 import { domain, providerConfig } from '#/db/schema'
 import { decryptSecret } from '#/server/crypto/secret-box'
 import { AppError } from '#/server/errors'
-import {
-  getProvider,
-  type MailProvider,
-  type ProviderRuntimeConfig,
-} from '#/server/providers'
+import { getProvider } from '#/server/providers'
+import type { MailProvider, ProviderRuntimeConfig } from '#/server/providers'
 
 export interface ResolvedProvider {
   provider: MailProvider
@@ -25,7 +22,7 @@ export async function getProviderById(
       .from(providerConfig)
       .where(eq(providerConfig.id, providerConfigId))
       .limit(1)
-  )[0]
+  ).at(0)
 
   if (!row) {
     throw new AppError('provider_error', '服务商配置不存在', 500)
@@ -56,7 +53,7 @@ export async function resolveSendProviderForDomain(
       .innerJoin(providerConfig, eq(providerConfig.id, domain.providerConfigId))
       .where(eq(domain.id, domainId))
       .limit(1)
-  )[0]
+  ).at(0)
 
   if (!row) throw new AppError('validation_failed', '域名不存在')
   if (row.domain.status !== 'verified') {

@@ -245,7 +245,7 @@ export const adminVerifyDomainFn = createServerFn({ method: 'POST' })
       const actor = await requireAdmin()
       const row = (
         await db.select().from(domain).where(eq(domain.id, data.id)).limit(1)
-      )[0]
+      ).at(0)
       if (!row) throw new AppError('not_found', '域名不存在', 404)
 
       const resolved = await getProviderById(row.providerConfigId)
@@ -848,7 +848,7 @@ export const adminCreateLoginMethodFn = createServerFn({ method: 'POST' })
           .from(authProvider)
           .where(eq(authProvider.providerId, providerId))
           .limit(1)
-      )[0]
+      ).at(0)
       if (existing) {
         throw new AppError('conflict', '该回调标识已被使用', 409)
       }
@@ -915,7 +915,7 @@ export const adminUpdateLoginMethodFn = createServerFn({ method: 'POST' })
           .from(authProvider)
           .where(eq(authProvider.id, data.id))
           .limit(1)
-      )[0]
+      ).at(0)
       if (!row) throw new AppError('not_found', '登录方式不存在', 404)
 
       if (data.enabled === false && row.enabled) {
@@ -965,7 +965,7 @@ export const adminDeleteLoginMethodFn = createServerFn({ method: 'POST' })
           .from(authProvider)
           .where(eq(authProvider.id, data.id))
           .limit(1)
-      )[0]
+      ).at(0)
       if (!row) throw new AppError('not_found', '登录方式不存在', 404)
 
       if (row.enabled) {
@@ -1134,7 +1134,7 @@ export const adminListUsersFn = createServerFn({ method: 'POST' })
         rows: page.map((row) => ({
           ...row,
           createdAt: row.createdAt.getTime(),
-          mailboxCount: Number(row.mailboxCount ?? 0),
+          mailboxCount: Number(row.mailboxCount),
           passkeyCount: passkeyByUser.get(row.id) ?? 0,
           // 顺序即绑定顺序，第一条是注册时的来源
           loginMethods: methodsByUser.get(row.id) ?? [],

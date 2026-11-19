@@ -2,16 +2,16 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 
 import { asAddressList, asRecord, asString } from './email-event'
 import { requestJson, trimBaseUrl } from './http'
-import {
-  ProviderError,
-  type DnsRecord,
-  type InboundContent,
-  type MailProvider,
-  type MessageStatus,
-  type OutboundMessage,
-  type ProviderRuntimeConfig,
-  type SendResult,
-  type VerifiedWebhookEvent,
+import { ProviderError } from './types'
+import type {
+  DnsRecord,
+  InboundContent,
+  MailProvider,
+  MessageStatus,
+  OutboundMessage,
+  ProviderRuntimeConfig,
+  SendResult,
+  VerifiedWebhookEvent,
 } from './types'
 
 /**
@@ -235,7 +235,9 @@ function eventIdFor(
   return `${type}:${createHash('sha256').update(rawBody).digest('hex').slice(0, 32)}`
 }
 
-function providedSecret(headers: Record<string, string>): string | null {
+function providedSecret(
+  headers: Record<string, string | undefined>,
+): string | null {
   for (const name of SECRET_HEADERS) {
     const value = headers[name]?.trim()
     if (value) return value
@@ -505,7 +507,7 @@ export const plunkProvider: MailProvider = {
       '/domains/project/current',
     )
 
-    return (data ?? []).flatMap((item) => {
+    return data.flatMap((item) => {
       const hostname = asString(item.domain)?.trim()
       if (!item.id || !hostname) return []
       return [
@@ -551,7 +553,7 @@ export const plunkProvider: MailProvider = {
       request<PlunkDomain[]>(config, '/domains/project/current'),
     ])
 
-    const found = (domains ?? []).find((item) => item.id === providerDomainId)
+    const found = domains.find((item) => item.id === providerDomainId)
     if (!found) {
       throw new ProviderError('Plunk 未找到该域名', {
         code: 'not_found',

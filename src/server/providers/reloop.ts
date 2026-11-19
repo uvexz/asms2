@@ -4,18 +4,18 @@ import { formatAddress } from '#/lib/email-address'
 
 import { asAddressList, asRecord, asString } from './email-event'
 import { requestJson, trimBaseUrl } from './http'
-import {
-  ProviderError,
-  type DnsRecord,
-  type InboundAttachmentMeta,
-  type InboundContent,
-  type MailProvider,
-  type MessageStatus,
-  type OutboundMessage,
-  type ProviderDomainSummary,
-  type ProviderRuntimeConfig,
-  type SendResult,
-  type VerifiedWebhookEvent,
+import { ProviderError } from './types'
+import type {
+  DnsRecord,
+  InboundAttachmentMeta,
+  InboundContent,
+  MailProvider,
+  MessageStatus,
+  OutboundMessage,
+  ProviderDomainSummary,
+  ProviderRuntimeConfig,
+  SendResult,
+  VerifiedWebhookEvent,
 } from './types'
 
 /**

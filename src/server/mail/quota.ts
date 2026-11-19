@@ -49,7 +49,7 @@ export async function reserveSendQuota(
     where daily_usage.sent_count < ${limit}
   `)
 
-  return Number(result.rowsAffected ?? 0) > 0
+  return Number(result.rowsAffected) > 0
 }
 
 export async function refundSendQuota(userId: string, usageDate: string) {
@@ -77,7 +77,7 @@ export async function getSendUsage(
         and(eq(dailyUsage.userId, userId), eq(dailyUsage.usageDate, usageDate)),
       )
       .limit(1)
-  )[0]
+  ).at(0)
 
   const sent = row?.sentCount ?? 0
   return {

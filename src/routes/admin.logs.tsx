@@ -2,15 +2,15 @@ import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 
-import { Button } from '@/components/base/buttons/button'
-import { Chip } from '@/components/base/badges/chip'
+import { Button } from '#/components/base/buttons/button'
+import { Chip } from '#/components/base/badges/chip'
 import {
   SegmentedControl,
   SegmentedControlItem,
-} from '@/components/base/segmented-control/segmented-control'
-import { Spinner } from '@/components/base/spinner/spinner'
-import { ErrorState } from '@/components/application/errors/error-state'
-import { EmptyHint, PageSection } from '@/components/admin/ui'
+} from '#/components/base/segmented-control/segmented-control'
+import { Spinner } from '#/components/base/spinner/spinner'
+import { ErrorState } from '#/components/application/errors/error-state'
+import { EmptyHint, PageSection } from '#/components/admin/ui'
 import {
   adminListAuditFn,
   adminListUnroutedFn,

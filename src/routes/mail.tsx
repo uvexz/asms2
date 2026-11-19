@@ -1,7 +1,7 @@
 import { Outlet, createFileRoute, redirect } from '@tanstack/react-router'
 
-import { MailShell } from '@/components/mail/mail-shell'
-import { RouteErrorState } from '@/components/application/errors/error-state'
+import { MailShell } from '#/components/mail/mail-shell'
+import { RouteErrorState } from '#/components/application/errors/error-state'
 import { mailboxesQuery, messagesInfiniteQuery, quotaQuery } from '#/lib/api'
 
 const FOLDERS = ['inbox', 'sent', 'spam', 'trash', 'archive'] as const

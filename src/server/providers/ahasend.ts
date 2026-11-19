@@ -6,16 +6,16 @@ import {
 } from './email-event'
 import { requestJson, trimBaseUrl } from './http'
 import { verifyStandardSignature } from './signature'
-import {
-  ProviderError,
-  type DnsRecord,
-  type MailProvider,
-  type MessageStatus,
-  type OutboundMessage,
-  type ProviderDomainSummary,
-  type ProviderRuntimeConfig,
-  type SendResult,
-  type VerifiedWebhookEvent,
+import { ProviderError } from './types'
+import type {
+  DnsRecord,
+  MailProvider,
+  MessageStatus,
+  OutboundMessage,
+  ProviderDomainSummary,
+  ProviderRuntimeConfig,
+  SendResult,
+  VerifiedWebhookEvent,
 } from './types'
 
 const DEFAULT_BASE_URL = 'https://api.ahasend.com'

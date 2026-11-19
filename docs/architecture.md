@@ -23,17 +23,17 @@ asms2 是**邮件应用层**，不是邮件传输代理（MTA）。这句话决�
 
 ## 2. 模块划分
 
-| 模块          | 职责                                              | 代码位置                                                           |
-| ------------- | ------------------------------------------------- | ------------------------------------------------------------------ |
-| 用户面板      | 邮箱管理、收发件、筛选、配额、个人设置            | `src/routes/mail*`、`src/routes/settings.tsx`、`components/mail/*` |
-| 管理面板      | 站点、域名、服务商、Webhook、登录方式、用户、日志 | `src/routes/admin*`、`components/admin/*`                          |
-| 邮件适配层    | 统一收发/域名/Webhook 验签，错误归一              | `src/server/providers/*`                                           |
-| 收件处理      | 验签 → 去重 → 解析收件人 → 拉正文 → 净化 → 入库   | `src/server/webhooks/process.ts`、`src/server/mail/ingest.ts`      |
-| 发件服务      | 校验 → 配额 → 调服务商 → 落库                     | `src/server/mail/send.ts`                                          |
-| 认证与权限    | Better Auth、角色、API Key、守卫                  | `src/server/auth/*`                                                |
-| Telegram 通知 | Bot 配置、绑定码、update 分发、入站推送           | `src/server/telegram/*`、`src/routes/api/telegram/webhook.ts`      |
-| 数据层        | Drizzle schema、libSQL 客户端、迁移               | `src/db/*`、`drizzle/*`                                            |
-| 定时任务      | 过期邮箱、垃圾/墓碑清理                           | `src/server/jobs/sweep.ts`、`src/routes/api/cron/sweep.ts`         |
+| 模块          | 职责                                              | 代码位置                                                               |
+| ------------- | ------------------------------------------------- | ---------------------------------------------------------------------- |
+| 用户面板      | 邮箱管理、收发件、筛选、配额、个人设置            | `src/routes/mail*`、`src/routes/settings.tsx`、`src/components/mail/*` |
+| 管理面板      | 站点、域名、服务商、Webhook、登录方式、用户、日志 | `src/routes/admin*`、`src/components/admin/*`                          |
+| 邮件适配层    | 统一收发/域名/Webhook 验签，错误归一              | `src/server/providers/*`                                               |
+| 收件处理      | 验签 → 去重 → 解析收件人 → 拉正文 → 净化 → 入库   | `src/server/webhooks/process.ts`、`src/server/mail/ingest.ts`          |
+| 发件服务      | 校验 → 配额 → 调服务商 → 落库                     | `src/server/mail/send.ts`                                              |
+| 认证与权限    | Better Auth、角色、API Key、守卫                  | `src/server/auth/*`                                                    |
+| Telegram 通知 | Bot 配置、绑定码、update 分发、入站推送           | `src/server/telegram/*`、`src/routes/api/telegram/webhook.ts`          |
+| 数据层        | Drizzle schema、libSQL 客户端、迁移               | `src/db/*`、`drizzle/*`                                                |
+| 定时任务      | 过期邮箱、垃圾/墓碑清理                           | `src/server/jobs/sweep.ts`、`src/routes/api/cron/sweep.ts`             |
 
 依赖方向（强约束）：
 
@@ -360,7 +360,7 @@ Better Auth 的 `emailAndPassword` / `socialProviders` / 插件列表在实例�
 | 阅读器      | `IconButton` + `Chip` + `Divider` + sandbox `iframe`                                   |
 | 管理后台    | `PageSection`（组合）+ `Switch` + `Select` + `Input` + `Chip` + `Modal`                |
 
-- 一律优先使用 `components/` 下的 BoardUI 组件；缺件先 `npx boardui@latest add <name>`，不手写替代品。
+- 一律优先使用 `src/components/` 下的 BoardUI 组件；缺件先 `npx boardui@latest add <name>`，不手写替代品。
 - 没有现成件的「邮箱列表 / 邮件行 / 阅读器」由 BoardUI 原语组合，只用语义 token 与复合排版类。
 - 正文渲染在 `sandbox` iframe 中，默认禁止远程图片（可手动加载）。
 

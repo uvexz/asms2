@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 
 import { db } from '#/db/client'
 import { appMeta, siteSettings } from '#/db/schema'
+import { AppError } from '#/server/errors'
 
 export type SiteSettings = typeof siteSettings.$inferSelect
 
@@ -19,7 +20,7 @@ async function loadSiteSettings(): Promise<SiteSettings> {
       .from(siteSettings)
       .where(eq(siteSettings.id, 'default'))
       .limit(1)
-  )[0]
+  ).at(0)
 
   if (!row) {
     await db
@@ -32,9 +33,13 @@ async function loadSiteSettings(): Promise<SiteSettings> {
         .from(siteSettings)
         .where(eq(siteSettings.id, 'default'))
         .limit(1)
-    )[0]
+    ).at(0)
   }
 
+  // 建表/并发异常时这里仍可能读不到；显式失败好过把 undefined 当配置往下传。
+  if (!row) {
+    throw new AppError('internal', '站点配置初始化失败', 500)
+  }
   return row
 }
 
@@ -76,7 +81,7 @@ export async function getPublicSiteConfig() {
 export async function getMeta(key: string): Promise<string | null> {
   const row = (
     await db.select().from(appMeta).where(eq(appMeta.key, key)).limit(1)
-  )[0]
+  ).at(0)
   return row?.value ?? null
 }
 

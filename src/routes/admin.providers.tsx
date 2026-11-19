@@ -10,24 +10,24 @@ import {
   RiRefreshLine,
 } from '@remixicon/react'
 
-import { Button } from '@/components/base/buttons/button'
-import { Chip } from '@/components/base/badges/chip'
-import { Checkbox } from '@/components/base/checkbox/checkbox'
-import { Input } from '@/components/base/input/input'
+import { Button } from '#/components/base/buttons/button'
+import { Chip } from '#/components/base/badges/chip'
+import { Checkbox } from '#/components/base/checkbox/checkbox'
+import { Input } from '#/components/base/input/input'
 import {
   AlertDialog,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
-} from '@/components/base/modal/modal'
-import { Select, SelectItem } from '@/components/base/select/select'
-import { Switch } from '@/components/base/switch/switch'
-import { Spinner } from '@/components/base/spinner/spinner'
-import { toast } from '@/components/base/toast/toast'
-import { Divider } from '@/components/base/divider/divider'
-import { ErrorState } from '@/components/application/errors/error-state'
-import { EmptyHint, PageSection } from '@/components/admin/ui'
+} from '#/components/base/modal/modal'
+import { Select, SelectItem } from '#/components/base/select/select'
+import { Switch } from '#/components/base/switch/switch'
+import { Spinner } from '#/components/base/spinner/spinner'
+import { toast } from '#/components/base/toast/toast'
+import { Divider } from '#/components/base/divider/divider'
+import { ErrorState } from '#/components/application/errors/error-state'
+import { EmptyHint, PageSection } from '#/components/admin/ui'
 import {
   adminCreateProviderFn,
   adminCreateWebhookFn,
