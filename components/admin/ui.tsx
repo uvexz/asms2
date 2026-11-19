@@ -18,7 +18,7 @@ export function PageSection({
   return (
     <section
       className={cx(
-        'rounded-3xl border border-border-button-default bg-background-primary-default p-5',
+        'rounded-3xl border border-border-button-default bg-background-primary-default p-4 sm:p-5',
         className,
       )}
     >
@@ -42,13 +42,20 @@ export function StatTile({
   label,
   value,
   hint,
+  className,
 }: {
   label: string
   value: ReactNode
   hint?: string
+  className?: string
 }) {
   return (
-    <div className="rounded-2xl border border-border-button-default bg-background-secondary-default p-4">
+    <div
+      className={cx(
+        'rounded-2xl border border-border-button-default bg-background-secondary-default p-4',
+        className,
+      )}
+    >
       <p className="text-caption-1-regular text-text-tertiary">{label}</p>
       <p className="mt-1 text-title-2-medium tabular-nums text-text-primary">
         {value}
@@ -68,11 +75,21 @@ export function EmptyHint({ children }: { children: ReactNode }) {
   )
 }
 
-export function KeyValue({ label, value }: { label: string; value: ReactNode }) {
+export function KeyValue({
+  label,
+  value,
+}: {
+  label: string
+  value: ReactNode
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1">
-      <span className="text-caption-1-regular text-text-tertiary">{label}</span>
-      <span className="text-caption-1-medium text-text-primary">{value}</span>
+    <div className="flex flex-col gap-0.5 py-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+      <span className="shrink-0 text-caption-1-regular text-text-tertiary">
+        {label}
+      </span>
+      <span className="min-w-0 break-all text-caption-1-medium text-text-primary sm:text-end">
+        {value}
+      </span>
     </div>
   )
 }

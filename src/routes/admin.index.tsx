@@ -35,19 +35,20 @@ function AdminOverview() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid auto-rows-fr grid-cols-2 gap-3 xl:grid-cols-5">
         <StatTile label="用户" value={data?.users ?? 0} />
         <StatTile label="邮箱" value={data?.mailboxes ?? 0} hint="不含已删除" />
         <StatTile label="邮件总数" value={data?.messages ?? 0} />
         <StatTile label="已发送" value={data?.outbound ?? 0} />
         <StatTile
+          className="col-span-2 xl:col-span-1"
           label="失败 Webhook"
           value={data?.failedWebhooks ?? 0}
           hint="需关注"
         />
       </div>
 
-      <div className="rounded-3xl border border-border-button-default bg-background-primary-default p-5">
+      <div className="rounded-3xl border border-border-button-default bg-background-primary-default p-4 sm:p-5">
         <h3 className="text-headline-medium text-text-primary">下一步</h3>
         <ol className="mt-3 flex flex-col gap-2 text-body-regular text-text-secondary">
           <li>

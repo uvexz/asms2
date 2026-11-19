@@ -3,7 +3,10 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 
 import { Chip } from '@/components/base/badges/chip'
-import { SegmentedControl, SegmentedControlItem } from '@/components/base/segmented-control/segmented-control'
+import {
+  SegmentedControl,
+  SegmentedControlItem,
+} from '@/components/base/segmented-control/segmented-control'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { EmptyHint, PageSection } from '@/components/admin/ui'
 import {
@@ -46,7 +49,11 @@ function AdminLogs() {
             selectedKeys={[tab]}
             onSelectionChange={(keys) => {
               const next = Array.from(keys)[0]
-              if (next === 'audit' || next === 'webhook' || next === 'unrouted') {
+              if (
+                next === 'audit' ||
+                next === 'webhook' ||
+                next === 'unrouted'
+              ) {
                 setTab(next)
               }
             }}
@@ -66,19 +73,28 @@ function AdminLogs() {
           ) : (
             <div className="flex flex-col divide-y divide-separator-border">
               {(audit.data ?? []).map((row) => (
-                <div key={row.id} className="flex items-center justify-between gap-3 py-2">
+                <div
+                  key={row.id}
+                  className="flex items-center justify-between gap-3 py-2"
+                >
                   <div className="min-w-0">
                     <p className="truncate text-body-regular text-text-primary">
                       {row.action}
                       {row.targetId ? (
-                        <span className="text-text-tertiary"> · {row.targetId}</span>
+                        <span className="text-text-tertiary">
+                          {' '}
+                          · {row.targetId}
+                        </span>
                       ) : null}
                     </p>
-                    <p className="text-caption-1-regular text-text-tertiary">
-                      {row.actorEmail ?? '系统'} · {formatDateTime(row.createdAt)}
+                    <p className="truncate text-caption-1-regular text-text-tertiary">
+                      {row.actorEmail ?? '系统'} ·{' '}
+                      {formatDateTime(row.createdAt)}
                     </p>
                   </div>
-                  <Chip color="gray">{row.targetType ?? 'system'}</Chip>
+                  <Chip className="shrink-0" color="gray">
+                    {row.targetType ?? 'system'}
+                  </Chip>
                 </div>
               ))}
             </div>
@@ -93,17 +109,21 @@ function AdminLogs() {
           ) : (
             <div className="flex flex-col divide-y divide-separator-border">
               {(events.data ?? []).map((row) => (
-                <div key={row.id} className="flex items-center justify-between gap-3 py-2">
+                <div
+                  key={row.id}
+                  className="flex items-center justify-between gap-3 py-2"
+                >
                   <div className="min-w-0">
                     <p className="truncate text-body-regular text-text-primary">
                       {row.type}
                     </p>
-                    <p className="text-caption-1-regular text-text-tertiary">
+                    <p className="truncate text-caption-1-regular text-text-tertiary">
                       {formatDateTime(row.receivedAt)}
                       {row.error ? ` · ${row.error}` : ''}
                     </p>
                   </div>
                   <Chip
+                    className="shrink-0"
                     color={
                       row.status === 'processed'
                         ? 'lime'
@@ -128,7 +148,10 @@ function AdminLogs() {
           ) : (
             <div className="flex flex-col divide-y divide-separator-border">
               {(unrouted.data ?? []).map((row) => (
-                <div key={row.id} className="flex items-center justify-between gap-3 py-2">
+                <div
+                  key={row.id}
+                  className="flex items-center justify-between gap-3 py-2"
+                >
                   <div className="min-w-0">
                     <p className="truncate text-body-regular text-text-primary">
                       {row.subject || '(无主题)'}
@@ -137,7 +160,9 @@ function AdminLogs() {
                       {row.from} · {formatDateTime(row.createdAt)}
                     </p>
                   </div>
-                  <Chip color="yellow">{row.reason}</Chip>
+                  <Chip className="shrink-0" color="yellow">
+                    {row.reason}
+                  </Chip>
                 </div>
               ))}
             </div>

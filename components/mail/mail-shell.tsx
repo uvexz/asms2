@@ -293,11 +293,14 @@ function RailContent({
             }}
           />
         </div>
-        <div className="mt-3 flex items-center justify-between">
-          <span className="text-caption-1-regular text-text-tertiary">
+        {/* The theme control is a fixed-width segmented switch, not the
+            full-row "Dark mode" switch: paired with the remaining count in
+            one row, the labelled switch squeezed the count onto two lines. */}
+        <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-separator-border pt-2.5">
+          <span className="whitespace-nowrap text-caption-1-regular text-text-tertiary">
             {quota.data ? `剩余 ${quota.data.remaining} 封` : '配额加载中'}
           </span>
-          <ThemeToggle />
+          <ThemeToggle appearance="segmented" size="small" />
         </div>
       </div>
     </div>
@@ -377,7 +380,7 @@ function MailboxRow({
       <Dropdown>
         <DropdownTrigger
           aria-label="邮箱操作"
-          className="rounded-md p-1 text-foreground-icon-tertiary opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+          className="rounded-md p-1 text-foreground-icon-tertiary transition-opacity focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
         >
           <RiArrowDownSLine className="size-4" aria-hidden />
         </DropdownTrigger>
@@ -447,11 +450,14 @@ export function MailShell({ children }: { children: ReactNode }) {
 
       <Drawer
         placement="start"
+        size="sm"
         isOpen={mobileOpen}
         onOpenChange={setMobileOpen}
         aria-label="导航"
+        // Drop Modal's 24px vertical padding so the rail fills the panel.
+        className="py-0"
       >
-        <DrawerBody className="w-[280px] p-3">{rail}</DrawerBody>
+        <DrawerBody className="w-full p-3">{rail}</DrawerBody>
       </Drawer>
 
       <div className="flex min-w-0 flex-1 flex-col">

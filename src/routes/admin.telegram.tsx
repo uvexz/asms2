@@ -291,7 +291,7 @@ function AdminTelegram() {
           <li>用「发送测试消息」验证管理员自己已绑定的会话能收到。</li>
         </ol>
 
-        <div className="mt-4 flex items-center gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button
             size="small"
             variant="secondary"
@@ -301,7 +301,7 @@ function AdminTelegram() {
             复制 Webhook 路径
           </Button>
           <span
-            className="font-mono text-caption-1-regular text-text-tertiary"
+            className="min-w-0 break-all font-mono text-caption-1-regular text-text-tertiary"
             dir="ltr"
           >
             {data.webhookPath}

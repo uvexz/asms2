@@ -214,7 +214,7 @@ function AdminProviders() {
               key={item.id}
               className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border-button-default p-4"
             >
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="flex size-9 items-center justify-center rounded-xl bg-accent-50 text-accent-700">
                   <RiKey2Line className="size-4" aria-hidden />
                 </span>
@@ -240,7 +240,7 @@ function AdminProviders() {
                   <Chip color="blue">默认发件</Chip>
                 ) : null}
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 {item.capabilities?.domainApi ? (
                   <Button
                     size="small"
@@ -298,8 +298,8 @@ function AdminProviders() {
                 className="rounded-2xl border border-border-button-default p-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <p className="text-body-medium text-text-primary">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <p className="min-w-0 break-all text-body-medium text-text-primary">
                       {item.label}
                     </p>
                     <Chip color="gray">{item.providerLabel}</Chip>
@@ -307,7 +307,7 @@ function AdminProviders() {
                       {item.enabled ? '启用' : '停用'}
                     </Chip>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-caption-1-regular text-text-tertiary">
                       已收 {item.eventCount} 个事件
                     </span>

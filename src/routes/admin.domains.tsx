@@ -120,8 +120,8 @@ function AdminDomains() {
                 className="rounded-2xl border border-border-button-default p-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-body-medium text-text-primary">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="min-w-0 break-all text-body-medium text-text-primary">
                       {item.hostname}
                     </span>
                     <Chip
@@ -214,7 +214,7 @@ function AdminDomains() {
                       DNS 记录（{records.length} 条）
                     </summary>
                     <div className="mt-2 overflow-x-auto">
-                      <table className="w-full text-start text-caption-1-regular">
+                      <table className="w-full min-w-[520px] text-start text-caption-1-regular">
                         <thead className="text-text-tertiary">
                           <tr>
                             <th className="py-1.5 pe-3 text-start font-medium">类型</th>

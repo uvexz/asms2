@@ -59,7 +59,11 @@ function AdminUsers() {
               value={q}
               onChange={setQ}
             />
-            <Button variant="secondary" size="small" onClick={() => setSearch(q)}>
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={() => setSearch(q)}
+            >
               搜索
             </Button>
           </div>
@@ -116,8 +120,8 @@ function UserCard({ row, onSaved }: { row: UserRow; onSaved: () => void }) {
     <div className="rounded-2xl border border-border-button-default p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="truncate text-body-medium text-text-primary">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="min-w-0 truncate text-body-medium text-text-primary">
               {row.name}
             </p>
             {role === 'admin' ? <Chip color="blue">管理员</Chip> : null}
