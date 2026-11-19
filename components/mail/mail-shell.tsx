@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -8,19 +9,14 @@ import {
   RiDeleteBinLine,
   RiFileCopyLine,
   RiInboxLine,
-  RiLogoutBoxRLine,
   RiMailLine,
   RiMailSendLine,
-  RiMenuLine,
   RiRefreshLine,
   RiSearchLine,
-  RiSettings4Line,
-  RiShieldKeyholeLine,
   RiSpam2Line,
   RiTimeLine,
 } from '@remixicon/react'
 
-import { Avatar } from '@/components/base/avatar/avatar'
 import { Counter } from '@/components/base/badges/counter'
 import { Button } from '@/components/base/buttons/button'
 import { IconButton } from '@/components/base/buttons/icon-button'
@@ -31,18 +27,23 @@ import {
   DropdownPopover,
   DropdownTrigger,
 } from '@/components/base/dropdown/dropdown'
-import { Drawer, DrawerBody } from '@/components/base/drawer/drawer'
 import { Input } from '@/components/base/input/input'
 import { Spinner } from '@/components/base/spinner/spinner'
 import { ThemeToggle } from '@/components/application/theme/theme-toggle'
 import { toast } from '@/components/base/toast/toast'
-import { authClient } from '#/lib/auth-client'
+import { AppShell } from '@/components/shell/app-shell'
+import {
+  SidebarAccount,
+  SidebarNav,
+  SidebarNavButton,
+} from '@/components/shell/sidebar'
 import { mailboxesQuery, quotaQuery, remainingLabel } from '#/lib/api'
 import type { MailboxView } from '#/server/mail/mailbox'
 import { removeMailboxFn } from '#/server/fns/mail'
 
 import { ComposeModal } from './compose-modal'
-import { ComposeContext, type ComposeOptions } from './compose-context'
+import { ComposeContext } from './compose-context'
+import type { ComposeOptions } from './compose-context'
 import { CreateMailboxModal } from './create-mailbox-modal'
 
 const mailRoute = getRouteApi('/mail')
@@ -70,7 +71,6 @@ function RailContent({
 }) {
   const search = mailRoute.useSearch()
   const navigate = useNavigate({ from: '/mail' })
-  const { session } = rootApi.useRouteContext()
   const queryClient = useQueryClient()
   const quota = useQuery(quotaQuery)
 
@@ -103,89 +103,28 @@ function RailContent({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Avatar
-            size="sm"
-            initials={(session?.name ?? session?.email ?? 'U')
-              .slice(0, 1)
-              .toUpperCase()}
-          />
-          <div className="min-w-0">
-            <p className="truncate text-body-medium text-text-primary">
-              {session?.name ?? '未登录'}
-            </p>
-            <p className="truncate text-caption-1-regular text-text-tertiary">
-              {session?.email}
-            </p>
-          </div>
-        </div>
-        <Dropdown>
-          <DropdownTrigger
-            aria-label="账户菜单"
-            className="rounded-lg p-1.5 text-foreground-icon-secondary hover:bg-background-secondary-hover"
-          >
-            <RiArrowDownSLine className="size-4" aria-hidden />
-          </DropdownTrigger>
-          <DropdownPopover aria-label="账户菜单" placement="bottom end">
-            <DropdownItem
-              onSelect={() => {
-                void navigate({ to: '/settings' })
-              }}
-            >
-              <RiSettings4Line className="size-4" aria-hidden /> 个人设置
-            </DropdownItem>
-            {session?.role === 'admin' ? (
-              <DropdownItem
-                onSelect={() => {
-                  void navigate({ to: '/admin' })
-                }}
-              >
-                <RiShieldKeyholeLine className="size-4" aria-hidden /> 管理后台
-              </DropdownItem>
-            ) : null}
-            <DropdownDivider />
-            <DropdownItem
-              onSelect={async () => {
-                await authClient.signOut()
-                await navigate({ to: '/login' })
-              }}
-            >
-              <RiLogoutBoxRLine className="size-4" aria-hidden /> 退出登录
-            </DropdownItem>
-          </DropdownPopover>
-        </Dropdown>
-      </div>
+      <SidebarAccount />
 
       <Button className="w-full" leadingIcon={RiAddLine} onClick={onCompose}>
         写信
       </Button>
 
-      <nav className="flex flex-col gap-0.5">
-        {FOLDERS.map((folder) => {
-          const active = search.folder === folder.key
-          return (
-            <button
-              key={folder.key}
-              type="button"
-              onClick={() =>
-                select({ folder: folder.key, messageId: undefined })
-              }
-              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-start text-body-medium transition-colors ${
-                active
-                  ? 'bg-accent-50 text-accent-700'
-                  : 'text-text-secondary hover:bg-background-secondary-hover'
-              }`}
-            >
-              <folder.icon className="size-4 shrink-0" aria-hidden />
-              <span className="flex-1 truncate">{folder.label}</span>
-              {folder.key === 'inbox' && totalUnread > 0 ? (
+      <SidebarNav>
+        {FOLDERS.map((folder) => (
+          <SidebarNavButton
+            key={folder.key}
+            icon={folder.icon}
+            label={folder.label}
+            active={search.folder === folder.key}
+            onClick={() => select({ folder: folder.key, messageId: undefined })}
+            trailing={
+              folder.key === 'inbox' && totalUnread > 0 ? (
                 <Counter color="primary">{totalUnread}</Counter>
-              ) : null}
-            </button>
-          )
-        })}
-      </nav>
+              ) : null
+            }
+          />
+        ))}
+      </SidebarNav>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mb-1 flex items-center justify-between px-1">
@@ -402,7 +341,6 @@ export function MailShell({ children }: { children: ReactNode }) {
   const [composeOpen, setComposeOpen] = useState(false)
   const [composeOptions, setComposeOptions] = useState<ComposeOptions>({})
   const [createOpen, setCreateOpen] = useState(false)
-  const [mobileOpen, setMobileOpen] = useState(false)
   const [q, setQ] = useState('')
   const search = mailRoute.useSearch()
   const navigate = useNavigate({ from: '/mail' })
@@ -425,91 +363,72 @@ export function MailShell({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer)
   }, [q, search.q, navigate])
 
-  const rail = (
-    <RailContent
-      mailboxes={mailboxes.data ?? []}
-      loading={mailboxes.isLoading}
-      onCompose={() => {
-        setComposeOptions({})
-        setComposeOpen(true)
-        setMobileOpen(false)
-      }}
-      onCreate={() => {
-        setCreateOpen(true)
-        setMobileOpen(false)
-      }}
-      onNavigate={() => setMobileOpen(false)}
-    />
-  )
-
   return (
-    <div className="flex h-dvh overflow-hidden bg-background-full">
-      <aside className="hidden w-[272px] shrink-0 flex-col border-e border-separator-border bg-background-secondary-default p-3 lg:flex">
-        {rail}
-      </aside>
-
-      <Drawer
-        placement="start"
-        size="sm"
-        isOpen={mobileOpen}
-        onOpenChange={setMobileOpen}
-        aria-label="导航"
-        // Drop Modal's 24px vertical padding so the rail fills the panel.
-        className="py-0"
-      >
-        <DrawerBody className="w-full p-3">{rail}</DrawerBody>
-      </Drawer>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-separator-border px-3 lg:px-5">
-          <IconButton
-            className="lg:hidden"
-            size="small"
-            icon={RiMenuLine}
-            aria-label="打开导航"
-            onClick={() => setMobileOpen(true)}
-          />
-          <div className="min-w-0 flex-1">
-            <Input
-              aria-label="搜索邮件"
-              placeholder="搜索主题或发件人"
-              leadingIcon={RiSearchLine}
-              value={q}
-              onChange={setQ}
-              className="max-w-[520px]"
+    <>
+      <AppShell
+        fixed
+        navLabel="导航"
+        header={
+          <>
+            <div className="min-w-0 flex-1">
+              <Input
+                aria-label="搜索邮件"
+                placeholder="搜索主题或发件人"
+                leadingIcon={RiSearchLine}
+                value={q}
+                onChange={setQ}
+                className="max-w-[520px]"
+              />
+            </div>
+            <span className="hidden text-body-medium text-text-secondary md:block">
+              {site?.siteName ?? 'asms2'}
+            </span>
+            <IconButton
+              size="small"
+              icon={RiRefreshLine}
+              aria-label="刷新"
+              onClick={() => {
+                void mailboxes.refetch()
+                void queryClient.invalidateQueries({ queryKey: ['messages'] })
+                void queryClient.invalidateQueries({
+                  queryKey: ['messages-latest'],
+                })
+                void navigate({
+                  search: (prev) => ({ ...prev }),
+                  replace: true,
+                })
+              }}
             />
-          </div>
-          <span className="hidden text-body-medium text-text-secondary md:block">
-            {site?.siteName ?? 'asms2'}
-          </span>
-          <IconButton
-            size="small"
-            icon={RiRefreshLine}
-            aria-label="刷新"
-            onClick={() => {
-              void mailboxes.refetch()
-              void queryClient.invalidateQueries({ queryKey: ['messages'] })
-              void queryClient.invalidateQueries({
-                queryKey: ['messages-latest'],
-              })
-              void navigate({ search: (prev) => ({ ...prev }), replace: true })
+          </>
+        }
+        sidebar={(closeNav) => (
+          <RailContent
+            mailboxes={mailboxes.data ?? []}
+            loading={mailboxes.isLoading}
+            onCompose={() => {
+              setComposeOptions({})
+              setComposeOpen(true)
+              closeNav()
             }}
+            onCreate={() => {
+              setCreateOpen(true)
+              closeNav()
+            }}
+            onNavigate={closeNav}
           />
-        </header>
-
-        <main className="flex min-h-0 flex-1">
-          <ComposeContext.Provider
-            value={{
-              openCompose: (options) => {
-                setComposeOptions(options ?? {})
-                setComposeOpen(true)
-              },
-            }}
-          >
-            {children}
-          </ComposeContext.Provider>
-        </main>
-      </div>
+        )}
+      >
+        <ComposeContext.Provider
+          value={{
+            openCompose: (options) => {
+              setComposeOptions(options ?? {})
+              setComposeOpen(true)
+            },
+          }}
+        >
+          {children}
+        </ComposeContext.Provider>
+      </AppShell>
 
       <ComposeModal
         isOpen={composeOpen}
@@ -520,6 +439,6 @@ export function MailShell({ children }: { children: ReactNode }) {
         defaultSubject={composeOptions.subject}
       />
       <CreateMailboxModal isOpen={createOpen} onOpenChange={setCreateOpen} />
-    </div>
+    </>
   )
 }
