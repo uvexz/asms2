@@ -30,7 +30,12 @@ const NAV = [
     icon: RiGlobalLine,
     exact: false,
   },
-  { to: '/admin/providers', label: '服务商', icon: RiKey2Line, exact: false },
+  {
+    to: '/admin/providers',
+    label: '发信服务',
+    icon: RiKey2Line,
+    exact: false,
+  },
   {
     to: '/admin/auth',
     label: '登录设置',
