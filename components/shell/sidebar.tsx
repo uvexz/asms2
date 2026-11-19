@@ -13,7 +13,7 @@ import {
   RiShieldKeyholeLine,
 } from '@remixicon/react'
 
-import { Avatar } from '@/components/base/avatar/avatar'
+import { UserAvatar } from '@/components/shell/user-avatar'
 import {
   Dropdown,
   DropdownDivider,
@@ -106,11 +106,11 @@ export function SidebarAccount() {
   return (
     <div className="flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-2">
-        <Avatar
+        <UserAvatar
+          name={session?.name}
+          email={session?.email}
+          image={session?.image}
           size="sm"
-          initials={(session?.name ?? session?.email ?? 'U')
-            .slice(0, 1)
-            .toUpperCase()}
         />
         <div className="min-w-0">
           <p className="truncate text-body-medium text-text-primary">
