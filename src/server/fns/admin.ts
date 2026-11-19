@@ -23,6 +23,7 @@ import { encryptSecret, last4 } from '#/server/crypto/secret-box'
 import { AppError, attempt } from '#/server/errors'
 import { getProviderById } from '#/server/mail/provider-config'
 import { getProvider } from '#/server/providers'
+import type { DnsRecord } from '#/server/providers'
 import { bumpAuthConfigVersion, getSiteSettings } from '#/server/settings'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
@@ -308,6 +309,154 @@ export const adminDeleteDomainFn = createServerFn({ method: 'POST' })
       await db.delete(domain).where(eq(domain.id, data.id))
       await audit(actor.id, 'domain.delete', 'domain', data.id)
       return { id: data.id }
+    }),
+  )
+
+export const adminDiscoverProviderDomainsFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) =>
+    z.object({ providerConfigId: z.string() }).parse(data),
+  )
+  .handler(async ({ data }) =>
+    attempt(async () => {
+      await requireAdmin()
+      const resolved = await getProviderById(data.providerConfigId)
+      if (!resolved.provider.listDomains) {
+        throw new AppError(
+          'not_implemented',
+          `${resolved.config.label} 不支持读取账号域名列表`,
+          501,
+        )
+      }
+
+      const discovered = await resolved.provider.listDomains(resolved.runtime)
+      const existing = await db
+        .select({ hostname: domain.hostname })
+        .from(domain)
+      const taken = new Set(existing.map((row) => row.hostname))
+      const seen = new Set<string>()
+      const candidates: {
+        providerDomainId: string
+        hostname: string
+        status: string
+      }[] = []
+
+      for (const item of discovered) {
+        const hostname = item.hostname.trim().toLowerCase()
+        if (!hostname || taken.has(hostname) || seen.has(hostname)) continue
+        seen.add(hostname)
+        candidates.push({
+          providerDomainId: item.providerDomainId,
+          hostname,
+          status: item.status,
+        })
+      }
+
+      return {
+        providerLabel: resolved.config.label,
+        domains: candidates,
+      }
+    }),
+  )
+
+export const adminImportProviderDomainsFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) =>
+    z
+      .object({
+        providerConfigId: z.string(),
+        providerDomainIds: z.array(z.string()).min(1).max(100),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }) =>
+    attempt(async () => {
+      const actor = await requireAdmin()
+      const resolved = await getProviderById(data.providerConfigId)
+      if (!resolved.provider.listDomains) {
+        throw new AppError(
+          'not_implemented',
+          `${resolved.config.label} 不支持读取账号域名列表`,
+          501,
+        )
+      }
+
+      // 不信任前端传来的域名：以服务商返回的列表为准重新核对一遍
+      const discovered = await resolved.provider.listDomains(resolved.runtime)
+      const byId = new Map(
+        discovered.map((item) => [item.providerDomainId, item]),
+      )
+
+      const existing = await db
+        .select({ hostname: domain.hostname })
+        .from(domain)
+      const taken = new Set(existing.map((row) => row.hostname))
+      const details: {
+        providerDomainId: string
+        hostname: string
+        status: 'pending' | 'verified' | 'failed' | 'disabled'
+        records: DnsRecord[]
+      }[] = []
+
+      for (const id of new Set(data.providerDomainIds)) {
+        const item = byId.get(id)
+        if (!item) continue
+        const hostname = item.hostname.trim().toLowerCase()
+        if (!hostname || taken.has(hostname)) continue
+        taken.add(hostname)
+
+        const detail = resolved.provider.getDomain
+          ? await resolved.provider.getDomain(id, resolved.runtime)
+          : null
+        const status = detail?.status ?? item.status
+        details.push({
+          providerDomainId: id,
+          hostname,
+          status: ['pending', 'verified', 'failed', 'disabled'].includes(status)
+            ? (status as 'pending' | 'verified' | 'failed' | 'disabled')
+            : 'pending',
+          records: detail?.records ?? [],
+        })
+      }
+
+      if (details.length === 0) {
+        throw new AppError(
+          'validation_failed',
+          '所选域名已被添加，或已不在服务商账号中',
+          400,
+        )
+      }
+
+      const now = new Date()
+      await db.insert(domain).values(
+        details.map((item) => ({
+          id: idPart(),
+          hostname: item.hostname,
+          providerConfigId: data.providerConfigId,
+          providerDomainId: item.providerDomainId,
+          allowPermanentCreate: true,
+          allowTempCreate: true,
+          status: item.status,
+          dnsRecordsJson:
+            item.records.length > 0 ? JSON.stringify(item.records) : null,
+          lastCheckedAt: now,
+          verifiedAt: item.status === 'verified' ? now : null,
+          createdAt: now,
+          updatedAt: now,
+        })),
+      )
+
+      await audit(
+        actor.id,
+        'domain.import',
+        'provider',
+        data.providerConfigId,
+        {
+          hostnames: details.map((item) => item.hostname),
+        },
+      )
+      return {
+        imported: details.length,
+        hostnames: details.map((item) => item.hostname),
+      }
     }),
   )
 

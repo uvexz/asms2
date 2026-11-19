@@ -9,6 +9,7 @@ import {
   type InboundContent,
   type MailProvider,
   type OutboundMessage,
+  type ProviderDomainSummary,
   type ProviderRuntimeConfig,
   type SendResult,
   type VerifiedWebhookEvent,
@@ -195,6 +196,38 @@ export const resendProvider: MailProvider = {
         code: 'invalid_signature',
       })
     }
+  },
+
+  async listDomains(config) {
+    const resend = createClient(config)
+    const domains: ProviderDomainSummary[] = []
+    let after: string | undefined
+
+    for (let page = 0; page < 10; page += 1) {
+      const data = unwrap(
+        (await resend.domains.list({
+          limit: 100,
+          ...(after ? { after } : {}),
+        })) as ResendResponse<{
+          data: { id: string; name: string; status: string }[]
+          has_more: boolean
+        }>,
+      )
+
+      for (const item of data.data) {
+        domains.push({
+          providerDomainId: item.id,
+          hostname: item.name,
+          status: mapStatus(item.status),
+        })
+      }
+
+      const cursor = data.data.at(-1)?.id
+      if (!data.has_more || !cursor) break
+      after = cursor
+    }
+
+    return domains
   },
 
   async createDomain(hostname, config) {

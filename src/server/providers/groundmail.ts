@@ -13,6 +13,7 @@ import {
   type InboundContent,
   type MailProvider,
   type OutboundMessage,
+  type ProviderDomainSummary,
   type ProviderRuntimeConfig,
   type SendResult,
   type VerifiedWebhookEvent,
@@ -400,6 +401,39 @@ export const groundmailProvider: MailProvider = {
       createdAt: asString(payload.created_at) ?? undefined,
       data: payload.data,
     })
+  },
+
+  async listDomains(config) {
+    const domains: ProviderDomainSummary[] = []
+    let cursor: string | undefined
+
+    for (let page = 0; page < 10; page += 1) {
+      const query = new URLSearchParams({ limit: '100' })
+      if (cursor) query.set('cursor', cursor)
+
+      const data = await request<{
+        domains?: { id?: string; name?: string; status?: string }[]
+        has_more?: boolean
+        next_cursor?: string | null
+      }>(config, `/domains?${query.toString()}`)
+
+      const items = data.domains ?? []
+      for (const item of items) {
+        const id = asString(item.id)
+        const hostname = asString(item.name)?.trim()
+        if (!id || !hostname) continue
+        domains.push({
+          providerDomainId: id,
+          hostname,
+          status: mapStatus(item.status),
+        })
+      }
+
+      if (!data.has_more || !data.next_cursor) break
+      cursor = data.next_cursor
+    }
+
+    return domains
   },
 
   async createDomain(hostname, config) {

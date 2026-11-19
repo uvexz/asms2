@@ -499,6 +499,25 @@ export const plunkProvider: MailProvider = {
     return { eventId, type, kind: 'ignored', createdAt, data: event }
   },
 
+  async listDomains(config) {
+    const data = await request<PlunkDomain[]>(
+      config,
+      '/domains/project/current',
+    )
+
+    return (data ?? []).flatMap((item) => {
+      const hostname = asString(item.domain)?.trim()
+      if (!item.id || !hostname) return []
+      return [
+        {
+          providerDomainId: item.id,
+          hostname,
+          status: item.verified ? 'verified' : 'pending',
+        },
+      ]
+    })
+  },
+
   async createDomain(hostname, config) {
     const host = hostname.toLowerCase()
 

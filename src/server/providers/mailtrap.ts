@@ -473,6 +473,26 @@ export const mailtrapProvider: MailProvider = {
     )
   },
 
+  async listDomains(config) {
+    const data = await request<{ data?: MailtrapDomain[] }>(
+      config,
+      '/api/domains',
+    )
+
+    return (data.data ?? []).flatMap((item) => {
+      const id = idString(item.id)
+      const hostname = asString(item.domain_name)?.trim()
+      if (!id || !hostname) return []
+      return [
+        {
+          providerDomainId: id,
+          hostname,
+          status: mapDomainStatus(item),
+        },
+      ]
+    })
+  },
+
   async createDomain(hostname, config) {
     // 不自动开入站：入站要改 MX，会接管整个域名的邮件，交给管理员显式确认
     const data = await request<MailtrapDomain>(config, '/api/domains', {

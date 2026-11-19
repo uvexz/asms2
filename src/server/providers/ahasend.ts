@@ -12,6 +12,7 @@ import {
   type MailProvider,
   type MessageStatus,
   type OutboundMessage,
+  type ProviderDomainSummary,
   type ProviderRuntimeConfig,
   type SendResult,
   type VerifiedWebhookEvent,
@@ -358,6 +359,39 @@ export const ahasendProvider: MailProvider = {
       createdAt: asString(payload.timestamp) ?? undefined,
       data: payload,
     }
+  },
+
+  async listDomains(config) {
+    const domains: ProviderDomainSummary[] = []
+    let after: string | undefined
+
+    for (let page = 0; page < 10; page += 1) {
+      const query = new URLSearchParams({ limit: '100' })
+      if (after) query.set('after', after)
+
+      const data = await request<{
+        data?: AhaSendDomain[]
+        pagination?: { has_more?: boolean; next_cursor?: string }
+      }>(config, `/domains?${query.toString()}`)
+
+      const items = data.data ?? []
+      for (const item of items) {
+        const hostname = asString(item.domain)?.trim()
+        if (!hostname) continue
+        // 与 createDomain 保持一致：AhaSend 的域名接口都用域名本身做标识
+        domains.push({
+          providerDomainId: hostname,
+          hostname,
+          status: mapStatus(item),
+        })
+      }
+
+      const cursor = data.pagination?.next_cursor
+      if (!data.pagination?.has_more || !cursor) break
+      after = cursor
+    }
+
+    return domains
   },
 
   async createDomain(hostname, config) {

@@ -9,6 +9,7 @@ import {
   type InboundContent,
   type MailProvider,
   type OutboundMessage,
+  type ProviderDomainSummary,
   type ProviderRuntimeConfig,
   type SendResult,
   type VerifiedWebhookEvent,
@@ -248,6 +249,38 @@ export const unitpostProvider: MailProvider = {
       createdAt: asString(payload.created_at) ?? undefined,
       data: payload.data,
     })
+  },
+
+  async listDomains(config) {
+    const domains: ProviderDomainSummary[] = []
+    let after: string | undefined
+
+    for (let page = 0; page < 10; page += 1) {
+      const query = new URLSearchParams({ limit: '100' })
+      if (after) query.set('after', after)
+
+      const data = await request<{
+        data?: UnitpostDomain[]
+        has_more?: boolean
+      }>(config, `/email/domains?${query.toString()}`)
+
+      const items = data.data ?? []
+      for (const item of items) {
+        const hostname = item.name?.trim()
+        if (!item.id || !hostname) continue
+        domains.push({
+          providerDomainId: item.id,
+          hostname,
+          status: mapStatus(item.status),
+        })
+      }
+
+      const cursor = items.at(-1)?.id
+      if (!data.has_more || !cursor) break
+      after = cursor
+    }
+
+    return domains
   },
 
   async createDomain(hostname, config) {

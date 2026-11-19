@@ -93,6 +93,13 @@ export interface DnsRecord {
   status?: string
 }
 
+/** 服务商账号里已有的域名，用于管理员保存 API Key 后提示导入 */
+export interface ProviderDomainSummary {
+  providerDomainId: string
+  hostname: string
+  status: string
+}
+
 export interface ProviderRuntimeConfig {
   apiKey: string
   apiBaseUrl?: string | null
@@ -200,6 +207,9 @@ export interface MailProvider {
     headers: Record<string, string>,
     config: ProviderRuntimeConfig,
   ): VerifiedWebhookEvent | VerifiedWebhookEvent[]
+
+  /** 列出账号下已有的域名；未实现时后台不会提示导入 */
+  listDomains?(config: ProviderRuntimeConfig): Promise<ProviderDomainSummary[]>
 
   createDomain?(
     hostname: string,

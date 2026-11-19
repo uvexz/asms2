@@ -12,6 +12,7 @@ import {
   type MailProvider,
   type MessageStatus,
   type OutboundMessage,
+  type ProviderDomainSummary,
   type ProviderRuntimeConfig,
   type SendResult,
   type VerifiedWebhookEvent,
@@ -510,6 +511,34 @@ export const reloopProvider: MailProvider = {
     }
 
     return { eventId, type, kind: 'ignored', createdAt, data: payload }
+  },
+
+  async listDomains(config) {
+    const domains: ProviderDomainSummary[] = []
+
+    for (let page = 1; page <= 10; page += 1) {
+      const data = await request<{
+        domains?: ReloopDomain[]
+        total?: number
+      }>(config, `/api/domain/v1/list?page=${page}&limit=100`)
+
+      const items = data.domains ?? []
+      for (const item of items) {
+        const id = asString(item.id)
+        const hostname = asString(item.domain)?.trim()
+        if (!id || !hostname) continue
+        domains.push({
+          providerDomainId: id,
+          hostname,
+          status: mapDomainStatus(item.status),
+        })
+      }
+
+      if (items.length === 0 || typeof data.total !== 'number') break
+      if (domains.length >= data.total) break
+    }
+
+    return domains
   },
 
   async createDomain(hostname, config) {

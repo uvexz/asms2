@@ -6,10 +6,12 @@ import {
   RiDeleteBinLine,
   RiFileCopyLine,
   RiKey2Line,
+  RiRefreshLine,
 } from '@remixicon/react'
 
 import { Button } from '@/components/base/buttons/button'
 import { Chip } from '@/components/base/badges/chip'
+import { Checkbox } from '@/components/base/checkbox/checkbox'
 import { Input } from '@/components/base/input/input'
 import {
   Modal,
@@ -28,6 +30,8 @@ import {
   adminCreateWebhookFn,
   adminDeleteProviderFn,
   adminDeleteWebhookFn,
+  adminDiscoverProviderDomainsFn,
+  adminImportProviderDomainsFn,
   adminListProvidersFn,
   adminListWebhooksFn,
   adminUpdateProviderFn,
@@ -38,10 +42,41 @@ export const Route = createFileRoute('/admin/providers')({
   component: AdminProviders,
 })
 
+type DiscoveredDomain = {
+  providerDomainId: string
+  hostname: string
+  status: string
+}
+
+type DiscoveryState = {
+  providerId: string
+  providerLabel: string
+  domains: DiscoveredDomain[]
+  selected: string[]
+}
+
+const DOMAIN_STATUS_LABEL: Record<string, string> = {
+  pending: '待验证',
+  verified: '已验证',
+  failed: '验证失败',
+  disabled: '已停用',
+}
+
+const DOMAIN_STATUS_COLOR: Record<string, 'lime' | 'rose' | 'yellow' | 'gray'> =
+  {
+    pending: 'yellow',
+    verified: 'lime',
+    failed: 'rose',
+    disabled: 'gray',
+  }
+
 function AdminProviders() {
   const queryClient = useQueryClient()
   const [providerOpen, setProviderOpen] = useState(false)
   const [webhookOpen, setWebhookOpen] = useState(false)
+  const [discovery, setDiscovery] = useState<DiscoveryState | null>(null)
+  const [discoveringId, setDiscoveringId] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
 
   const providers = useQuery({
     queryKey: ['admin', 'providers'],
@@ -76,6 +111,81 @@ function AdminProviders() {
     }
     toast.success('服务商已删除')
     await refresh()
+  }
+
+  function openDiscovery(
+    providerId: string,
+    providerLabel: string,
+    domains: DiscoveredDomain[],
+  ) {
+    if (domains.length === 0) {
+      toast.info(`${providerLabel} 账号下没有需要添加的新域名`)
+      return
+    }
+    setDiscovery({
+      providerId,
+      providerLabel,
+      domains,
+      selected: domains.map((item) => item.providerDomainId),
+    })
+  }
+
+  async function discover(providerId: string, providerLabel: string) {
+    setDiscoveringId(providerId)
+    const result = await adminDiscoverProviderDomainsFn({
+      data: { providerConfigId: providerId },
+    })
+    setDiscoveringId(null)
+    if (!result.ok) {
+      toast.error(`发现域名失败：${result.error.message}`)
+      return
+    }
+    openDiscovery(providerId, providerLabel, result.data.domains)
+  }
+
+  function toggleDiscovered(id: string, selected: boolean) {
+    setDiscovery((prev) =>
+      prev
+        ? {
+            ...prev,
+            selected: selected
+              ? Array.from(new Set([...prev.selected, id]))
+              : prev.selected.filter((item) => item !== id),
+          }
+        : prev,
+    )
+  }
+
+  function toggleAllDiscovered(selected: boolean) {
+    setDiscovery((prev) =>
+      prev
+        ? {
+            ...prev,
+            selected: selected
+              ? prev.domains.map((item) => item.providerDomainId)
+              : [],
+          }
+        : prev,
+    )
+  }
+
+  async function importSelected() {
+    if (!discovery || discovery.selected.length === 0) return
+    setImporting(true)
+    const result = await adminImportProviderDomainsFn({
+      data: {
+        providerConfigId: discovery.providerId,
+        providerDomainIds: discovery.selected,
+      },
+    })
+    setImporting(false)
+    if (!result.ok) {
+      toast.error(result.error.message)
+      return
+    }
+    toast.success(`已添加 ${result.data.imported} 个域名`)
+    setDiscovery(null)
+    await queryClient.invalidateQueries({ queryKey: ['admin', 'domains'] })
   }
 
   return (
@@ -131,6 +241,17 @@ function AdminProviders() {
                 ) : null}
               </div>
               <div className="flex items-center gap-3">
+                {item.capabilities?.domainApi ? (
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    leadingIcon={RiRefreshLine}
+                    onClick={() => void discover(item.id, item.label)}
+                    disabled={discoveringId === item.id}
+                  >
+                    {discoveringId === item.id ? '读取中…' : '发现域名'}
+                  </Button>
+                ) : null}
                 <label className="flex items-center gap-2 text-caption-1-regular text-text-secondary">
                   默认发件
                   <Switch
@@ -234,12 +355,23 @@ function AdminProviders() {
         open={providerOpen}
         onOpenChange={setProviderOpen}
         onCreated={() => void refresh()}
+        onDiscovered={openDiscovery}
       />
       <AddWebhookModal
         open={webhookOpen}
         onOpenChange={setWebhookOpen}
         providers={providers.data ?? []}
         onCreated={() => void refresh()}
+      />
+      <DiscoveryModal
+        state={discovery}
+        importing={importing}
+        onOpenChange={(open) => {
+          if (!open) setDiscovery(null)
+        }}
+        onToggle={toggleDiscovered}
+        onToggleAll={toggleAllDiscovered}
+        onImport={() => void importSelected()}
       />
     </div>
   )
@@ -328,10 +460,16 @@ function AddProviderModal({
   open,
   onOpenChange,
   onCreated,
+  onDiscovered,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated: () => void
+  onDiscovered: (
+    providerId: string,
+    providerLabel: string,
+    domains: DiscoveredDomain[],
+  ) => void
 }) {
   const [kind, setKind] = useState<ProviderKind>('resend')
   const [label, setLabel] = useState('Resend')
@@ -339,7 +477,7 @@ function AddProviderModal({
   const [accountId, setAccountId] = useState('')
   const [apiBaseUrl, setApiBaseUrl] = useState('')
   const [isDefault, setIsDefault] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [phase, setPhase] = useState<'idle' | 'saving' | 'discovering'>('idle')
 
   const meta =
     PROVIDER_KINDS.find((item) => item.id === kind) ?? PROVIDER_KINDS[0]
@@ -367,28 +505,43 @@ function AddProviderModal({
       toast.error('自定义网关需要填写 API Base URL')
       return
     }
-    setLoading(true)
+    const providerLabel = label.trim() || meta.name
+    setPhase('saving')
     const result = await adminCreateProviderFn({
       data: {
         kind,
-        label: label.trim() || meta.name,
+        label: providerLabel,
         apiKey: apiKey.trim(),
         accountId: meta.needsAccountId ? accountId.trim() : null,
         apiBaseUrl: apiBaseUrl.trim() || null,
         isDefaultForSend: isDefault,
       },
     })
-    setLoading(false)
     if (!result.ok) {
+      setPhase('idle')
       toast.error(result.error.message)
       return
     }
+
     toast.success('服务商已添加')
+    onCreated()
+
+    // 保存成功后立刻按账号读一次域名，失败不阻塞服务商创建
+    setPhase('discovering')
+    const discovered = await adminDiscoverProviderDomainsFn({
+      data: { providerConfigId: result.data.id },
+    })
+    setPhase('idle')
     setApiKey('')
     setAccountId('')
     setApiBaseUrl('')
-    onCreated()
     onOpenChange(false)
+
+    if (!discovered.ok) {
+      toast.error(`未能自动发现域名：${discovered.error.message}`)
+      return
+    }
+    onDiscovered(result.data.id, providerLabel, discovered.data.domains)
   }
 
   return (
@@ -455,12 +608,105 @@ function AddProviderModal({
             <Button variant="secondary" onClick={renderProps.close}>
               取消
             </Button>
-            <Button onClick={submit} disabled={loading}>
-              {loading ? '保存中…' : '保存'}
+            <Button onClick={submit} disabled={phase !== 'idle'}>
+              {phase === 'saving'
+                ? '保存中…'
+                : phase === 'discovering'
+                  ? '同步域名…'
+                  : '保存'}
             </Button>
           </ModalFooter>
         </>
       )}
+    </Modal>
+  )
+}
+
+function DiscoveryModal({
+  state,
+  importing,
+  onOpenChange,
+  onToggle,
+  onToggleAll,
+  onImport,
+}: {
+  state: DiscoveryState | null
+  importing: boolean
+  onOpenChange: (open: boolean) => void
+  onToggle: (id: string, selected: boolean) => void
+  onToggleAll: (selected: boolean) => void
+  onImport: () => void
+}) {
+  const allSelected = state
+    ? state.domains.length > 0 && state.selected.length === state.domains.length
+    : false
+  const someSelected = state ? state.selected.length > 0 && !allSelected : false
+
+  return (
+    <Modal isOpen={Boolean(state)} onOpenChange={onOpenChange} size="lg">
+      {(renderProps) =>
+        state ? (
+          <>
+            <ModalHeader
+              title="发现服务商域名"
+              description={`${state.providerLabel} 账号下还有 ${state.domains.length} 个域名未添加到本站，勾选后可以直接使用`}
+            />
+            <ModalBody className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <Checkbox
+                  isSelected={allSelected}
+                  isIndeterminate={someSelected}
+                  onChange={onToggleAll}
+                >
+                  全选
+                </Checkbox>
+                <span className="text-caption-1-regular text-text-tertiary">
+                  已选 {state.selected.length} / {state.domains.length}
+                </span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {state.domains.map((item) => (
+                  <div
+                    key={item.providerDomainId}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-border-button-default px-3 py-2"
+                  >
+                    <Checkbox
+                      isSelected={state.selected.includes(
+                        item.providerDomainId,
+                      )}
+                      onChange={(selected) =>
+                        onToggle(item.providerDomainId, selected)
+                      }
+                    >
+                      <span dir="ltr">{item.hostname}</span>
+                    </Checkbox>
+                    <Chip color={DOMAIN_STATUS_COLOR[item.status] ?? 'gray'}>
+                      {DOMAIN_STATUS_LABEL[item.status] ?? item.status}
+                    </Chip>
+                  </div>
+                ))}
+              </div>
+              <p className="text-caption-1-regular text-text-tertiary">
+                导入时沿用服务商侧的验证状态与 DNS
+                记录；邮箱新建权限默认开启，收发开关默认关闭，可在「域名」页调整。
+              </p>
+            </ModalBody>
+            <ModalFooter>
+              <Button variant="secondary" onClick={renderProps.close}>
+                暂不添加
+              </Button>
+              <Button
+                onClick={onImport}
+                disabled={importing || state.selected.length === 0}
+              >
+                {importing
+                  ? '添加中…'
+                  : `添加所选域名（${state.selected.length}）`}
+              </Button>
+            </ModalFooter>
+          </>
+        ) : null
+      }
     </Modal>
   )
 }
