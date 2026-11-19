@@ -96,7 +96,7 @@ routes / components  →  server/fns  →  server/{mail,webhooks,jobs,telegram} 
 - 发件必须走域名绑定的服务商，且域名 `status='verified'`、`sendingEnabled=true`；临时邮箱默认不能发信（`site_settings.allowTempSend`）。
 - 域名级新建开关 `allowPermanentCreate` / `allowTempCreate` **只控制新建**，不影响已有邮箱；判断只在这两个字段，`purpose` 已废弃。
 - 收件按 `to` 地址反查邮箱；一封邮件命中多个本站地址时只投第一个，其余记录在 `to_json`。
-- 前缀只允许 `[a-z0-9]`，长度取站点配置（长期最短 3、临时最短 8），保留字见 `DEFAULT_RESERVED_WORDS`。
+- 前缀只允许 `[a-z0-9]`，长度取站点配置（长期最短 3、临时最短 8），保留字见 `DEFAULT_RESERVED_WORDS`。保留字只有管理员能注册（如 `admin@`）；发往保留前缀的邮件统一转投同域名的 `admin@`，该邮箱不存在时按 unrouted 处理。
 
 ## 7. 命令与质量门
 

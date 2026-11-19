@@ -29,6 +29,8 @@ bun run dev                  # http://localhost:3000
 
 注册后，`BOOTSTRAP_ADMIN_EMAIL` 对应账号在站内无管理员时会自动提权。随后到 `/admin/providers` 填服务商 Key、`/admin/domains` 接入域名，详见 [服务商接入](./docs/providers/)（Resend / UnitPost / AhaSend / Groundmail / Mailtrap / Plunk / Reloop）。
 
+> **管理员应注册 `admin@` 前缀**（如 `admin@your-domain.com`）以便接收功能邮件：`postmaster`、`abuse`、`noreply` 等保留前缀的来信会统一转投到同域名的 `admin@`。
+
 > 只看界面可执行 `bunx tsx scripts/seed-demo.ts`（写入假服务商与演示域名，**生产禁用**）。
 
 ## 文档

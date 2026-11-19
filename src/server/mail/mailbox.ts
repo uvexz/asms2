@@ -174,6 +174,8 @@ export interface CreateMailboxInput {
   domainId?: string
   displayName?: string
   mailboxLimit?: number | null
+  /** 管理员放行保留前缀（如 admin@），普通用户始终禁止 */
+  allowReserved?: boolean
 }
 
 export async function createMailbox(
@@ -181,7 +183,9 @@ export async function createMailbox(
   input: CreateMailboxInput,
 ): Promise<MailboxView> {
   const settings = await getSiteSettings()
-  const localPart = validateLocalPart(input.localPart, input.kind, settings)
+  const localPart = validateLocalPart(input.localPart, input.kind, settings, {
+    allowReserved: input.allowReserved,
+  })
   const targetDomain = await resolveDomain(input.kind, input.domainId)
 
   const now = Date.now()

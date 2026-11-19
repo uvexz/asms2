@@ -34,6 +34,7 @@ node .output/server/index.mjs
 - 构建产物是自包含 Node 服务（Nitro `node-server` preset），默认监听 3000。
 - Node ≥ 20；`better-sqlite3` 已移除，无需编译原生模块（libSQL 自带绑定）。
 - 健康检查建议请求 `/login`（走 SSR 与数据库），不要只探端口。
+- **首次上线后，管理员应注册 `admin@<域名>` 长期邮箱**：`postmaster`、`abuse`、`noreply` 等保留前缀的来信会统一转投到同域名的 `admin@`，用于接收功能与职能邮件；不创建则这些来信会按 unrouted 处理。
 
 ## 3. Nginx 反向代理
 
@@ -115,6 +116,7 @@ turso db dump <db-name> > backup-$(date +%F).sql
 - [ ] 环境变量齐全，`SECRET_ENCRYPTION_KEY` 已备份到密钥管理
 - [ ] 已执行 `db:migrate`，并验证 `/login` 可打开
 - [ ] 已添加 Resend Key、域名验证通过、Webhook 有事件
+- [ ] 管理员已注册 `admin@` 邮箱，保留前缀（`postmaster`、`abuse`、`noreply` 等）来信可正常转投
 - [ ] `CRON_SECRET` 已配置，cron 每分钟命中且日志正常
 - [ ] 已用真实地址完成一次"收件 + 发件"闭环
 - [ ] 已关闭演示数据（`scripts/seed-demo.ts` 不得在生产执行）

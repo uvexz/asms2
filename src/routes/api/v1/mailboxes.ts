@@ -47,6 +47,7 @@ export const Route = createFileRoute('/api/v1/mailboxes')({
             domainId: body.domainId,
             displayName: body.displayName,
             mailboxLimit: user.mailboxLimit,
+            allowReserved: user.role === 'admin',
           })
           return Response.json({ ok: true, data: row }, { status: 201 })
         } catch (error) {

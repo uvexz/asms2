@@ -17,8 +17,13 @@ import type {
 } from '#/server/providers'
 import { getSiteSettings } from '#/server/settings'
 import { notifyInboundMessage } from '#/server/telegram/notify'
-import { parseAddress, parseAddressList } from '#/lib/email-address'
+import {
+  parseAddress,
+  parseAddressList,
+  splitMailboxAddress,
+} from '#/lib/email-address'
 
+import { getReservedWords } from './address'
 import { htmlToText, makeSnippet, sanitizeEmailHtml } from './content'
 import { incrementReceivedCount, usageDateFor } from './quota'
 
@@ -107,14 +112,33 @@ export async function ingestInbound(params: {
     return { status: 'unrouted', reason: 'unknown' }
   }
 
+  // 保留前缀（postmaster / abuse 等）不允许普通用户注册，
+  // 发往这些地址的邮件统一转投同域名的 admin@
+  const reservedWords = new Set(getReservedWords(settings))
+  const adminFallback = new Map<string, string>()
+  for (const item of recipients) {
+    const { localPart, domain } = splitMailboxAddress(item.address)
+    if (domain && reservedWords.has(localPart)) {
+      adminFallback.set(item.address, `admin@${domain}`)
+    }
+  }
+
+  const lookupAddresses = [
+    ...new Set([...addresses, ...adminFallback.values()]),
+  ]
   const candidates = await db
     .select()
     .from(mailbox)
-    .where(inArray(mailbox.address, addresses))
+    .where(inArray(mailbox.address, lookupAddresses))
 
   const byAddress = new Map(candidates.map((row) => [row.address, row]))
   const target = recipients
-    .map((item) => byAddress.get(item.address))
+    .map((item) => {
+      const direct = byAddress.get(item.address)
+      if (direct) return direct
+      const fallback = adminFallback.get(item.address)
+      return fallback ? byAddress.get(fallback) : undefined
+    })
     .find(Boolean)
 
   if (!target) {

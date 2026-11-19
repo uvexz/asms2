@@ -48,6 +48,7 @@ export const createMailboxFn = createServerFn({ method: 'POST' })
         domainId: data.domainId,
         displayName: data.displayName,
         mailboxLimit: user.mailboxLimit,
+        allowReserved: user.role === 'admin',
       })
     }),
   )
