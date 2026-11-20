@@ -403,6 +403,18 @@ export function LandingPage({ site, signedIn }: LandingPageProps) {
                 © {year} {siteName}
               </p>
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                <Link
+                  to="/terms"
+                  className="rounded-sm outline-none hover:text-text-primary hover:underline hover:underline-offset-3 focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                >
+                  服务条款
+                </Link>
+                <Link
+                  to="/privacy"
+                  className="rounded-sm outline-none hover:text-text-primary hover:underline hover:underline-offset-3 focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                >
+                  隐私政策
+                </Link>
                 <p>{site?.footerText ?? description}</p>
                 <LinkButton
                   href="https://github.com/uvexz/asms2"

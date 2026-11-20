@@ -9,9 +9,11 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 import {
   RiArrowDownSLine,
+  RiFileTextLine,
   RiLogoutBoxRLine,
   RiMailLine,
   RiSettings4Line,
+  RiShieldCheckLine,
   RiShieldKeyholeLine,
 } from '@remixicon/react'
 
@@ -160,6 +162,21 @@ export function SidebarAccount() {
               </DropdownItem>
             )
           ) : null}
+          <DropdownDivider />
+          <DropdownItem
+            onSelect={() => {
+              void navigate({ to: '/terms' })
+            }}
+          >
+            <RiFileTextLine className="size-4" aria-hidden /> 服务条款
+          </DropdownItem>
+          <DropdownItem
+            onSelect={() => {
+              void navigate({ to: '/privacy' })
+            }}
+          >
+            <RiShieldCheckLine className="size-4" aria-hidden /> 隐私政策
+          </DropdownItem>
           <DropdownDivider />
           <DropdownItem
             onSelect={async () => {

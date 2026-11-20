@@ -69,12 +69,16 @@ export async function getPublicSiteConfig() {
     siteDescription: s.siteDescription,
     logoUrl: s.logoUrl,
     faviconUrl: s.faviconUrl,
+    contactEmail: s.contactEmail,
     footerText: s.footerText,
     registrationEnabled: s.registrationEnabled,
     permanentPrefixMin: s.permanentPrefixMin,
     tempPrefixMin: s.tempPrefixMin,
     prefixMax: s.prefixMax,
     tempTtlMinutes: s.tempTtlMinutes,
+    trashRetentionDays: s.trashRetentionDays,
+    orphanRetentionDays: s.orphanRetentionDays,
+    deletedMailboxRetentionDays: s.deletedMailboxRetentionDays,
   }
 }
 

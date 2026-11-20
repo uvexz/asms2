@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  Link,
   createFileRoute,
   getRouteApi,
   useNavigate,
@@ -129,7 +130,25 @@ function RegisterPage() {
           confirmPassword
           className="w-full max-w-[420px]"
           footnote={
-            site.footerText ?? `${site.siteName} · A Simple Mail Server`
+            <>
+              注册即表示同意{' '}
+              <Link
+                to="/terms"
+                className="rounded-sm text-text-secondary underline underline-offset-3 outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+              >
+                服务条款
+              </Link>{' '}
+              和{' '}
+              <Link
+                to="/privacy"
+                className="rounded-sm text-text-secondary underline underline-offset-3 outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+              >
+                隐私政策
+              </Link>
+              <span className="mt-1 block">
+                {site.footerText ?? `${site.siteName} · A Simple Mail Server`}
+              </span>
+            </>
           }
         />
       </TemplateCopyProvider>
