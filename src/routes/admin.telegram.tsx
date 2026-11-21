@@ -18,6 +18,7 @@ import { toast } from '#/components/base/toast/toast'
 import { ErrorState } from '#/components/application/errors/error-state'
 import { KeyValue, PageSection } from '#/components/admin/ui'
 import { formatDateTime, unwrap } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 import {
   adminDeleteTelegramWebhookFn,
   adminGetTelegramFn,
@@ -34,7 +35,7 @@ export const Route = createFileRoute('/admin/telegram')({
 function AdminTelegram() {
   const queryClient = useQueryClient()
   const query = useQuery({
-    queryKey: ['admin', 'telegram'],
+    queryKey: queryKeys.admin.telegram,
     queryFn: async () => unwrap(await adminGetTelegramFn()),
   })
 
@@ -73,7 +74,7 @@ function AdminTelegram() {
       return
     }
     setToken('')
-    queryClient.setQueryData(['admin', 'telegram'], result.data)
+    queryClient.setQueryData(queryKeys.admin.telegram, result.data)
     toast.success('已保存')
   }
 

@@ -14,7 +14,7 @@ import { toast } from '#/components/base/toast/toast'
 import { TemplateCopyProvider } from '#/components/foundations/template-copy/template-copy'
 import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
-import { loginConfigQuery } from '#/lib/api'
+import { clearUserCaches, loginConfigQuery } from '#/lib/api'
 
 export const DICT: Record<string, string> = {
   'Full name': '昵称',
@@ -42,8 +42,7 @@ const rootApi = getRouteApi('__root__')
 
 export const Route = createFileRoute('/login')({
   head: () => ({ meta: [{ title: '登录' }] }),
-  loader: ({ context }) =>
-    context.queryClient.ensureQueryData(loginConfigQuery),
+  loader: ({ context }) => context.queryClient.query(loginConfigQuery),
   component: LoginPage,
 })
 
@@ -73,7 +72,7 @@ function LoginPage() {
 
   async function goAfterLogin(emailVerified: boolean) {
     // 清掉上一个会话残留的查询缓存，再让路由重新取 session
-    queryClient.clear()
+    clearUserCaches(queryClient)
     await router.invalidate()
     if (verificationRequired && !emailVerified) {
       await navigate({ to: '/verify-email' })
@@ -130,7 +129,7 @@ function LoginPage() {
           autoFill: true,
           fetchOptions: {
             onSuccess: () => {
-              queryClient.clear()
+              clearUserCaches(queryClient)
               void router
                 .invalidate()
                 .then(() =>

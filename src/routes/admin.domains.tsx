@@ -33,6 +33,7 @@ import {
   adminVerifyDomainFn,
 } from '#/server/fns/admin'
 import { unwrap } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 
 export const Route = createFileRoute('/admin/domains')({
   head: () => ({ meta: [{ title: '域名 · 管理后台' }] }),
@@ -74,16 +75,16 @@ function AdminDomains() {
   } | null>(null)
 
   const domains = useQuery({
-    queryKey: ['admin', 'domains'],
+    queryKey: queryKeys.admin.domains,
     queryFn: async () => unwrap(await adminListDomainsFn()),
   })
   const providers = useQuery({
-    queryKey: ['admin', 'providers'],
+    queryKey: queryKeys.admin.providers,
     queryFn: async () => unwrap(await adminListProvidersFn()),
   })
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: ['admin', 'domains'] })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.admin.domains })
   }
 
   async function verify(id: string) {

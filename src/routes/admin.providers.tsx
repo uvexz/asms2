@@ -41,6 +41,7 @@ import {
   adminUpdateWebhookFn,
 } from '#/server/fns/admin'
 import { unwrap } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 
 export const Route = createFileRoute('/admin/providers')({
   head: () => ({ meta: [{ title: '服务商 · 管理后台' }] }),
@@ -100,17 +101,17 @@ function AdminProviders() {
   const [editingWebhook, setEditingWebhook] = useState<WebhookRow | null>(null)
 
   const providers = useQuery({
-    queryKey: ['admin', 'providers'],
+    queryKey: queryKeys.admin.providers,
     queryFn: async () => unwrap(await adminListProvidersFn()),
   })
   const webhooks = useQuery({
-    queryKey: ['admin', 'webhooks'],
+    queryKey: queryKeys.admin.webhooks,
     queryFn: async () => unwrap(await adminListWebhooksFn()),
   })
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] })
-    await queryClient.invalidateQueries({ queryKey: ['admin', 'webhooks'] })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.admin.providers })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.admin.webhooks })
   }
 
   async function setDefault(id: string, value: boolean) {
@@ -128,7 +129,7 @@ function AdminProviders() {
 
   async function toggleWebhook(item: WebhookRow, enabled: boolean) {
     // 乐观更新：Turso 延迟下开关不会停在原位
-    queryClient.setQueryData<WebhookRow[]>(['admin', 'webhooks'], (old) =>
+    queryClient.setQueryData<WebhookRow[]>(queryKeys.admin.webhooks, (old) =>
       old
         ? old.map((row) => (row.id === item.id ? { ...row, enabled } : row))
         : old,
@@ -138,7 +139,7 @@ function AdminProviders() {
     })
     if (!result.ok) {
       toast.error(result.error.message)
-      queryClient.setQueryData<WebhookRow[]>(['admin', 'webhooks'], (old) =>
+      queryClient.setQueryData<WebhookRow[]>(queryKeys.admin.webhooks, (old) =>
         old
           ? old.map((row) =>
               row.id === item.id ? { ...row, enabled: item.enabled } : row,
@@ -147,7 +148,7 @@ function AdminProviders() {
       )
       return
     }
-    await queryClient.invalidateQueries({ queryKey: ['admin', 'webhooks'] })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.admin.webhooks })
   }
 
   async function removeProvider() {
@@ -250,7 +251,7 @@ function AdminProviders() {
     }
     toast.success(`已添加 ${result.data.imported} 个域名`)
     setDiscovery(null)
-    await queryClient.invalidateQueries({ queryKey: ['admin', 'domains'] })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.admin.domains })
   }
 
   return (

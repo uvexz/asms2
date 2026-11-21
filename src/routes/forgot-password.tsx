@@ -12,8 +12,7 @@ import { loginConfigQuery } from '#/lib/api'
 
 export const Route = createFileRoute('/forgot-password')({
   head: () => ({ meta: [{ title: '找回密码' }] }),
-  loader: ({ context }) =>
-    context.queryClient.ensureQueryData(loginConfigQuery),
+  loader: ({ context }) => context.queryClient.query(loginConfigQuery),
   component: ForgotPasswordPage,
 })
 

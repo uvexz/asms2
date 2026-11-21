@@ -31,6 +31,7 @@ import { ThemeToggle } from '#/components/application/theme/theme-toggle'
 import { PageSection, KeyValue } from '#/components/admin/ui'
 import { authClient } from '#/lib/auth-client'
 import { loginConfigQuery, mailboxesQuery, quotaQuery, unwrap } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 import { listSsoAccountsFn, unlinkSsoAccountFn } from '#/server/fns/account'
 import {
   createTelegramBindCodeFn,
@@ -114,7 +115,7 @@ function SettingsPage() {
   }, [session?.name])
 
   const keysQuery = useQuery({
-    queryKey: ['api-keys'],
+    queryKey: queryKeys.apiKeys,
     queryFn: async () => {
       const result = await apiKeyClient().list()
       if (result.error) {
@@ -152,7 +153,7 @@ function SettingsPage() {
     setNewKey(result.data.key)
     setKeyName('')
     // 立即把新 Key 追加到列表，而不是等下一次整页刷新
-    queryClient.setQueryData<ApiKeyRow[]>(['api-keys'], (old) => [
+    queryClient.setQueryData<ApiKeyRow[]>(queryKeys.apiKeys, (old) => [
       {
         id: result.data?.id ?? result.data!.key!,
         name: label,
@@ -172,7 +173,7 @@ function SettingsPage() {
       toast.error(result.error.message ?? '删除失败')
       throw new Error(result.error.message ?? '删除失败')
     }
-    queryClient.setQueryData<ApiKeyRow[]>(['api-keys'], (old) =>
+    queryClient.setQueryData<ApiKeyRow[]>(queryKeys.apiKeys, (old) =>
       (old ?? []).filter((item) => item.id !== revoking.id),
     )
     setRevoking(null)
@@ -377,7 +378,7 @@ interface TelegramLinkView {
 
 function TelegramSection() {
   const status = useQuery({
-    queryKey: ['telegram', 'status'],
+    queryKey: queryKeys.telegramStatus,
     queryFn: async () => unwrap(await telegramStatusFn()),
     staleTime: 10_000,
   })
@@ -865,7 +866,7 @@ function SsoSection() {
   const search = Route.useSearch()
 
   const query = useQuery({
-    queryKey: ['sso-accounts'],
+    queryKey: queryKeys.ssoAccounts,
     queryFn: async () => unwrap(await listSsoAccountsFn()),
     staleTime: 20_000,
   })
@@ -890,7 +891,7 @@ function SsoSection() {
     } else {
       toast.success('已绑定第三方账号')
     }
-    void queryClient.invalidateQueries({ queryKey: ['sso-accounts'] })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.ssoAccounts })
     // 清掉查询串，避免刷新页面时重复提示
     void navigate({
       to: '/settings',

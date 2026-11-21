@@ -6,6 +6,7 @@ import { ErrorState } from '#/components/application/errors/error-state'
 import { StatTile } from '#/components/admin/ui'
 import { adminOverviewFn } from '#/server/fns/admin'
 import { unwrap } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 
 export const Route = createFileRoute('/admin/')({
   head: () => ({ meta: [{ title: '概览 · 管理后台' }] }),
@@ -14,7 +15,7 @@ export const Route = createFileRoute('/admin/')({
 
 function AdminOverview() {
   const query = useQuery({
-    queryKey: ['admin', 'overview'],
+    queryKey: queryKeys.admin.overview,
     queryFn: async () => unwrap(await adminOverviewFn()),
   })
 

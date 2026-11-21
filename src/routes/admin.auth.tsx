@@ -30,6 +30,7 @@ import { toast } from '#/components/base/toast/toast'
 import { EmptyHint, PageSection } from '#/components/admin/ui'
 import { ErrorState } from '#/components/application/errors/error-state'
 import { unwrap } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 import {
   adminCreateLoginMethodFn,
   adminDeleteLoginMethodFn,
@@ -117,7 +118,7 @@ function AdminAuth() {
   const queryClient = useQueryClient()
   const router = useRouter()
   const query = useQuery({
-    queryKey: ['admin', 'login-methods'],
+    queryKey: queryKeys.admin.loginMethods,
     queryFn: async () => unwrap(await adminListLoginMethodsFn()),
   })
 
@@ -135,10 +136,12 @@ function AdminAuth() {
 
   async function refresh() {
     await queryClient.invalidateQueries({
-      queryKey: ['admin', 'login-methods'],
+      queryKey: queryKeys.admin.loginMethods,
     })
     // 登录页/找回密码页的按钮来自独立查询与根 loader，两处都要刷新
-    await queryClient.invalidateQueries({ queryKey: ['public-login-config'] })
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.publicLoginConfig,
+    })
     await router.invalidate()
   }
 

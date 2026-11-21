@@ -14,6 +14,7 @@ import { Select, SelectItem } from '#/components/base/select/select'
 import { Textarea } from '#/components/base/textarea/textarea'
 import { toast } from '#/components/base/toast/toast'
 import { quotaQuery } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 import type { MailboxView } from '#/server/mail/mailbox'
 import { sendMailFn } from '#/server/fns/mail'
 
@@ -103,7 +104,7 @@ export function ComposeModal({
 
     toast.success('邮件已发送')
     // 只刷新列表首页与配额；不再把无限列表的全部分页重取一遍
-    void queryClient.invalidateQueries({ queryKey: ['quota'] })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.quota })
     requestMailRefresh()
     onOpenChange(false)
   }

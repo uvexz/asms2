@@ -20,6 +20,7 @@ import { toast } from '#/components/base/toast/toast'
 import { Spinner } from '#/components/base/spinner/spinner'
 import { createMailboxFn } from '#/server/fns/mail'
 import { domainsQuery } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 import { randomNameLocalPart } from '#/lib/name-prefix'
 
 const rootApi = getRouteApi('__root__')
@@ -86,7 +87,7 @@ export function CreateMailboxModal({
     await navigator.clipboard
       .writeText(result.data.address)
       .catch(() => undefined)
-    await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes })
     onOpenChange(false)
   }
 

@@ -3,9 +3,9 @@ import { Outlet, createFileRoute, redirect } from '@tanstack/react-router'
 import { MailShell } from '#/components/mail/mail-shell'
 import { RouteErrorState } from '#/components/application/errors/error-state'
 import { mailboxesQuery, messagesInfiniteQuery, quotaQuery } from '#/lib/api'
+import type { MailFolder } from '#/lib/query-keys'
 
 const FOLDERS = ['inbox', 'sent', 'spam', 'trash', 'archive'] as const
-export type MailFolder = (typeof FOLDERS)[number]
 
 export interface MailSearch {
   folder: MailFolder
@@ -41,16 +41,21 @@ export const Route = createFileRoute('/mail')({
     q: search.q,
   }),
   loader: async ({ context, deps }) => {
+    const messages = messagesInfiniteQuery({
+      folder: deps.folder,
+      mailboxId: deps.mailboxId,
+      q: deps.q,
+    })
+
     await Promise.all([
-      context.queryClient.ensureQueryData(mailboxesQuery),
-      context.queryClient.ensureQueryData(quotaQuery),
-      context.queryClient.ensureInfiniteQueryData(
-        messagesInfiniteQuery({
-          folder: deps.folder,
-          mailboxId: deps.mailboxId,
-          q: deps.q,
-        }),
-      ),
+      context.queryClient.query(mailboxesQuery),
+      context.queryClient.query(quotaQuery),
+      // 无限查询的 refetch 会把已加载的每一页串行重取一遍，放在导航关键路径上
+      // 就是"再次进入看过的文件夹 = N 次 RPC + 白屏"。有缓存就先渲染，
+      // 新鲜度交给列表的 20s 轮询。
+      context.queryClient.getQueryData(messages.queryKey)
+        ? Promise.resolve()
+        : context.queryClient.infiniteQuery(messages),
     ])
   },
   head: () => ({ meta: [{ title: '邮箱' }] }),

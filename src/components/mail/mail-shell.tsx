@@ -46,6 +46,7 @@ import {
   remainingLabel,
   removeMailboxFromCaches,
 } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 import type { MailboxView } from '#/server/mail/mailbox'
 import { MAILBOX_LIST_LIMIT } from '#/lib/limits'
 import { removeMailboxFn } from '#/server/fns/mail'
@@ -123,7 +124,7 @@ function RailContent({
     }
     removeMailboxFromCaches(queryClient, deleting.id)
     setDeleting(null)
-    await queryClient.invalidateQueries({ queryKey: ['mailboxes'] })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes })
     // 当前列表可能包含该邮箱的邮件，刷新首页把它们去掉
     requestMailRefresh()
   }
@@ -452,9 +453,25 @@ export function MailShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  // 未读数靠 60s 轮询更新，但轮询在隐藏标签页暂停、聚焦刷新又全局关闭，
+  // 切回来必须主动补一次，否则要盯着旧徽标等半分钟。
+  useEffect(() => {
+    let last = 0
+    function onVisibilityChange() {
+      if (document.visibilityState !== 'visible') return
+      const now = Date.now()
+      if (now - last < 5_000) return
+      last = now
+      void mailboxes.refetch()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () =>
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [mailboxes.refetch])
+
   function refresh() {
     void mailboxes.refetch()
-    void queryClient.invalidateQueries({ queryKey: ['quota'] })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.quota })
     // 只刷新列表首页，不再走 navigate 触发全量 loader 重跑
     requestMailRefresh()
   }

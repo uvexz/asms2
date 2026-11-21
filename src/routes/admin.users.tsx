@@ -15,6 +15,7 @@ import { ErrorState } from '#/components/application/errors/error-state'
 import { PageSection } from '#/components/admin/ui'
 import { adminListUsersFn, adminUpdateUserFn } from '#/server/fns/admin'
 import { unwrap } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 
 export const Route = createFileRoute('/admin/users')({
   head: () => ({ meta: [{ title: '用户 · 管理后台' }] }),
@@ -60,7 +61,7 @@ function AdminUsers() {
   const [offset, setOffset] = useState(0)
 
   const query = useQuery({
-    queryKey: ['admin', 'users', search, offset],
+    queryKey: queryKeys.admin.users.list(search, offset),
     queryFn: async () =>
       unwrap(
         await adminListUsersFn({
@@ -70,7 +71,7 @@ function AdminUsers() {
   })
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: ['admin', 'users'] })
+    await queryClient.invalidateQueries({ queryKey: queryKeys.admin.users.all })
   }
 
   function submitSearch() {

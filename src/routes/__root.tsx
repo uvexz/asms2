@@ -43,7 +43,7 @@ const DEFAULT_ICON_LINKS = [
 export const Route = createRootRouteWithContext<MyRouterContext>()({
   beforeLoad: async ({ context }) => {
     // 每次导航都会跑 beforeLoad（含 Link 预取）；走 query 缓存后 30s 内不再发 RPC
-    const session = await context.queryClient.ensureQueryData(sessionQuery)
+    const session = await context.queryClient.query(sessionQuery)
     return { session }
   },
   loader: async () => {

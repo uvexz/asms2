@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
   RiArrowLeftLine,
@@ -21,12 +21,14 @@ import { toast } from '#/components/base/toast/toast'
 import {
   formatBytes,
   formatDateTime,
-  patchMailboxUnread,
+  messageQuery,
+  noteMessageWrite,
   patchMessageCaches,
   removeMessageFromCaches,
+  setMailboxUnread,
   unwrap,
 } from '#/lib/api'
-import { getMessageFn, updateMessageFn } from '#/server/fns/mail'
+import { updateMessageFn } from '#/server/fns/mail'
 import type { MailboxView } from '#/server/mail/mailbox'
 import { ErrorState } from '#/components/application/errors/error-state'
 
@@ -59,35 +61,66 @@ export function MessageReader({
   const { openCompose } = useCompose()
   const [allowImages, setAllowImages] = useState(false)
   const markUnreadId = useRef<string | null>(null)
+  const autoReadId = useRef<string | null>(null)
 
   useEffect(() => {
     // 换邮件必须重置：上一封放行过的远程图片不能延续到下一封（隐私）
     setAllowImages(false)
     markUnreadId.current = null
+    autoReadId.current = null
   }, [messageId])
 
-  const query = useQuery({
-    queryKey: ['message', messageId],
-    queryFn: async () =>
-      unwrap(await getMessageFn({ data: { id: messageId } })),
-    staleTime: 30_000,
-  })
+  const query = useQuery(messageQuery(messageId))
 
   const message = query.data
 
+  const {
+    mutate: runUpdate,
+    mutateAsync: runUpdateAsync,
+    isPending: updating,
+  } = useMutation({
+    mutationFn: async (input: {
+      id: string
+      isRead?: boolean
+      isStarred?: boolean
+      folder?: 'inbox' | 'sent' | 'trash' | 'spam' | 'archive'
+    }) => unwrap(await updateMessageFn({ data: input })),
+    onMutate: (input) => {
+      noteMessageWrite(input.id)
+      if (typeof input.isRead === 'boolean') {
+        patchMessageCaches(queryClient, input.id, { isRead: input.isRead })
+      }
+      if (typeof input.isStarred === 'boolean') {
+        patchMessageCaches(queryClient, input.id, {
+          isStarred: input.isStarred,
+        })
+      }
+    },
+    onError: (error: Error, input) => {
+      patchMessageCaches(queryClient, input.id, {
+        ...(typeof input.isRead === 'boolean' ? { isRead: !input.isRead } : {}),
+        ...(typeof input.isStarred === 'boolean'
+          ? { isStarred: !input.isStarred }
+          : {}),
+      })
+      toast.error(error.message)
+    },
+    onSuccess: (data) => {
+      // 服务端算的是该邮箱的绝对未读数：连点、重试、跨端都不会把计数越加越多
+      if (data.unreadCount !== null) {
+        setMailboxUnread(queryClient, data.mailboxId, data.unreadCount)
+      }
+    },
+  })
+
   useEffect(() => {
     if (!message || message.isRead) return
+    if (autoReadId.current === message.id) return
     if (markUnreadId.current === message.id) return
-    void updateMessageFn({ data: { id: message.id, isRead: true } }).then(
-      (result) => {
-        if (result.ok) {
-          patchMessageCaches(queryClient, message.id, { isRead: true })
-          // 局部调整未读数，避免整张邮箱列表（含未读聚合）重查
-          patchMailboxUnread(queryClient, message.mailboxId, -1)
-        }
-      },
-    )
-  }, [message, queryClient])
+    // 打开即已读；失败由 onError 回滚，不在同一个 id 上反复重试
+    autoReadId.current = message.id
+    runUpdate({ id: message.id, isRead: true })
+  }, [message, runUpdate])
 
   const srcDoc = useMemo(
     () => (message?.html ? buildSrcDoc(message.html, allowImages) : ''),
@@ -125,41 +158,27 @@ export function MessageReader({
   const fromMailbox = mailboxes.find((item) => item.id === message.mailboxId)
 
   async function act(action: 'trash' | 'unread' | 'star') {
-    if (!message) return
-    const data =
-      action === 'trash'
-        ? { id: message.id, folder: 'trash' as const }
-        : action === 'unread'
-          ? { id: message.id, isRead: false }
-          : { id: message.id, isStarred: !message.isStarred }
+    if (!message || updating) return
 
-    const result = await updateMessageFn({ data })
-    if (!result.ok) {
-      toast.error(result.error.message)
-      return
-    }
-
-    if (action === 'trash') {
-      removeMessageFromCaches(queryClient, message.id)
-      // 未读邮件被移走时同步扣减未读数
-      if (!message.isRead) {
-        patchMailboxUnread(queryClient, message.mailboxId, -1)
+    try {
+      if (action === 'trash') {
+        await runUpdateAsync({ id: message.id, folder: 'trash' })
+        removeMessageFromCaches(queryClient, message.id)
+        toast.success('已移入回收站')
+        void navigate({ to: '/mail', search: (prev) => ({ ...prev }) })
+        return
       }
-      toast.success('已移入回收站')
-      void navigate({ to: '/mail', search: (prev) => ({ ...prev }) })
-      return
-    }
 
-    if (action === 'unread') {
-      markUnreadId.current = message.id
-      patchMessageCaches(queryClient, message.id, { isRead: false })
-      patchMailboxUnread(queryClient, message.mailboxId, 1)
-      return
-    }
+      if (action === 'unread') {
+        markUnreadId.current = message.id
+        await runUpdateAsync({ id: message.id, isRead: false })
+        return
+      }
 
-    patchMessageCaches(queryClient, message.id, {
-      isStarred: !message.isStarred,
-    })
+      await runUpdateAsync({ id: message.id, isStarred: !message.isStarred })
+    } catch {
+      // onError 已经回滚缓存并提示
+    }
   }
 
   return (
@@ -197,18 +216,21 @@ export function MessageReader({
           size="small"
           icon={message.isStarred ? RiStarFill : RiStarLine}
           aria-label={message.isStarred ? '取消星标' : '加星标'}
+          disabled={updating}
           onClick={() => void act('star')}
         />
         <IconButton
           size="small"
           icon={RiMailUnreadLine}
           aria-label="标记未读"
+          disabled={updating}
           onClick={() => void act('unread')}
         />
         <IconButton
           size="small"
           icon={RiDeleteBinLine}
           aria-label="移入回收站"
+          disabled={updating}
           onClick={() => void act('trash')}
         />
         <div className="flex-1" />

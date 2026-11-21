@@ -274,6 +274,15 @@ export interface MessagePatch {
   folder?: MessageFolder
 }
 
+export interface UpdateMessageResult {
+  mailboxId: string
+  /**
+   * 该邮箱收件箱的最新未读数；只有影响未读的字段（isRead / folder）变化时才计算。
+   * 回绝对值而不是让前端做 ±1：连点、重试、跨端操作都不会把计数算歪。
+   */
+  unreadCount: number | null
+}
+
 /**
  * 一次写操作覆盖已读/星标/移动三种变更，避免 RPC 里串行跑多条 UPDATE。
  */
@@ -281,12 +290,14 @@ export async function updateMessage(
   userId: string,
   messageId: string,
   patch: MessagePatch,
-) {
+): Promise<UpdateMessageResult> {
   const values: MessagePatch = {}
   if (typeof patch.isRead === 'boolean') values.isRead = patch.isRead
   if (typeof patch.isStarred === 'boolean') values.isStarred = patch.isStarred
   if (patch.folder) values.folder = patch.folder
-  if (Object.keys(values).length === 0) return
+  if (Object.keys(values).length === 0) {
+    throw new AppError('validation_failed', '没有需要更新的字段', 400)
+  }
 
   const result = await db
     .update(message)
@@ -298,6 +309,30 @@ export async function updateMessage(
         visibleMailboxCondition(),
       ),
     )
-    .returning({ id: message.id })
+    .returning({ id: message.id, mailboxId: message.mailboxId })
   if (result.length === 0) throw new AppError('not_found', '邮件不存在', 404)
+
+  const affected = result[0]
+  const changesUnread =
+    values.isRead !== undefined || values.folder !== undefined
+  if (!changesUnread) {
+    return { mailboxId: affected.mailboxId, unreadCount: null }
+  }
+
+  // 与 listMailboxes 的未读口径保持一致：只算收件箱里的未读
+  const rows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(message)
+    .where(
+      and(
+        eq(message.mailboxId, affected.mailboxId),
+        eq(message.folder, 'inbox'),
+        eq(message.isRead, false),
+      ),
+    )
+
+  return {
+    mailboxId: affected.mailboxId,
+    unreadCount: Number(rows[0]?.count ?? 0),
+  }
 }

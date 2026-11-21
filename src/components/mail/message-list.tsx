@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import {
   RiAttachment2,
@@ -16,9 +20,12 @@ import { ErrorState } from '#/components/application/errors/error-state'
 import { cx } from '#/utils/cx'
 import {
   formatTime,
+  messageQuery,
   messagesInfiniteQuery,
+  noteMessageWrite,
   patchMessageCaches,
   refreshMessageFirstPage,
+  unwrap,
 } from '#/lib/api'
 import { updateMessageFn } from '#/server/fns/mail'
 
@@ -33,6 +40,7 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
   const navigate = useNavigate({ from: '/mail' })
   const queryClient = useQueryClient()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const lastRefreshRef = useRef(0)
 
   const filters = useMemo(
     () => ({
@@ -47,6 +55,10 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
 
   // 只重取首页：定时轮询和手动刷新都不再触碰已加载的后续分页
   const refreshFirstPage = useCallback(async () => {
+    const now = Date.now()
+    // 轮询、手动刷新、切回标签页可能在同一秒内撞在一起，5s 内只放一次
+    if (now - lastRefreshRef.current < 5_000) return
+    lastRefreshRef.current = now
     try {
       await refreshMessageFirstPage(queryClient, filters)
     } catch {
@@ -68,6 +80,29 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
     return () => clearInterval(timer)
   }, [query.isSuccess, refreshFirstPage])
 
+  // 首次进入某个筛选条件时，若缓存已经过期就先补一次首页：
+  // 挂载时不再重取全部分页，但也不该让人对着旧列表等满一个轮询周期。
+  const refreshedForFilters = useRef('')
+  useEffect(() => {
+    if (!query.isSuccess) return
+    const key = `${filters.folder}|${filters.mailboxId ?? ''}|${filters.q ?? ''}`
+    if (refreshedForFilters.current === key) return
+    refreshedForFilters.current = key
+    if (Date.now() - query.dataUpdatedAt > POLL_INTERVAL) {
+      void refreshFirstPage()
+    }
+  }, [query.isSuccess, query.dataUpdatedAt, filters, refreshFirstPage])
+
+  // 聚焦刷新全局关闭、轮询在隐藏标签页暂停，切回来必须主动补一次
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible') void refreshFirstPage()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () =>
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [refreshFirstPage])
+
   // 切换筛选条件后回到顶部，避免停留在上一个列表的滚动位置
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
@@ -86,16 +121,30 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
     return result
   }, [query.data])
 
-  async function toggleStar(id: string, starred: boolean) {
-    const next = !starred
-    patchMessageCaches(queryClient, id, { isStarred: next })
-    const result = await updateMessageFn({
-      data: { id, isStarred: next },
-    })
-    if (!result.ok) {
-      patchMessageCaches(queryClient, id, { isStarred: starred })
-      toast.error(result.error.message)
-    }
+  const starMutation = useMutation({
+    mutationFn: async (input: { id: string; isStarred: boolean }) =>
+      unwrap(await updateMessageFn({ data: input })),
+    onMutate: (input) => {
+      // 记下写入时刻：20s 轮询拿的是请求发出时的快照，不能把它盖回旧值
+      noteMessageWrite(input.id)
+      patchMessageCaches(queryClient, input.id, { isStarred: input.isStarred })
+    },
+    onError: (error: Error, input) => {
+      patchMessageCaches(queryClient, input.id, { isStarred: !input.isStarred })
+      toast.error(error.message)
+    },
+  })
+
+  function toggleStar(id: string, starred: boolean) {
+    const pendingSameRow =
+      starMutation.isPending && starMutation.variables.id === id
+    if (pendingSameRow) return
+    starMutation.mutate({ id, isStarred: !starred })
+  }
+
+  /** 悬停/聚焦时预取详情，点进阅读器不再有一次空白 spinner */
+  function prefetch(id: string) {
+    void queryClient.prefetchQuery(messageQuery(id))
   }
 
   function open(id: string) {
@@ -173,6 +222,8 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
               <button
                 type="button"
                 onClick={() => open(item.id)}
+                onMouseEnter={() => prefetch(item.id)}
+                onFocus={() => prefetch(item.id)}
                 aria-current={selectedId === item.id ? 'true' : undefined}
                 className={cx(
                   'flex w-full cursor-pointer flex-col gap-1 px-4 py-3 text-start transition-colors',
@@ -225,8 +276,12 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
                 type="button"
                 aria-label={item.isStarred ? '取消星标' : '加星标'}
                 aria-pressed={item.isStarred}
-                onClick={() => void toggleStar(item.id, item.isStarred)}
-                className="absolute end-1.5 top-2 grid size-6 place-items-center rounded-md text-foreground-icon-tertiary outline-none transition-colors hover:text-accent-600 focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                disabled={
+                  starMutation.isPending &&
+                  starMutation.variables.id === item.id
+                }
+                onClick={() => toggleStar(item.id, item.isStarred)}
+                className="absolute end-1.5 top-2 grid size-6 place-items-center rounded-md text-foreground-icon-tertiary outline-none transition-colors hover:text-accent-600 focus-visible:ring-2 focus-visible:ring-border-focus-ring disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {item.isStarred ? (
                   <RiStarFill className="size-4 text-accent-600" aria-hidden />

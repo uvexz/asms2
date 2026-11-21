@@ -366,8 +366,8 @@ Better Auth 的 `emailAndPassword` / `socialProviders` / 插件列表在实例�
 
 ### 6.4 数据获取
 
-- Query key：`['mailboxes']`、`['messages', filters]`、`['message', id]`、`['quota']`、`['admin', resource]`。
-- 列表 20s 轮询、邮箱列表 60s；已读/星标乐观更新后失效缓存。
+- Query key 统一定义在 `src/lib/query-keys.ts`，组件里不写裸字面量，失效时才不会漏。
+- 列表 20s 轮询只刷新首页、邮箱列表 60s；已读/星标走 `useMutation` 乐观补丁，不做整表失效，由下一轮轮询收敛。
 - server function 返回 `{ ok, data | error }`，统一 `unwrap()` 抛错给 UI。
 - 快捷键：`c` 写信、`/` 聚焦搜索；写信为 Modal，阅读为可深链路由。
 

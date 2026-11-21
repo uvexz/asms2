@@ -121,12 +121,11 @@ export const updateMessageFn = createServerFn({ method: 'POST' })
     attempt(async () => {
       const user = await requireUser()
       // 三种变更合并为单条 UPDATE，避免串行写三次
-      await updateMessage(user.id, data.id, {
+      return updateMessage(user.id, data.id, {
         isRead: data.isRead,
         isStarred: data.isStarred,
         folder: data.folder,
       })
-      return { id: data.id }
     }),
   )
 

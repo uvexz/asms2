@@ -15,7 +15,7 @@ import { toast } from '#/components/base/toast/toast'
 import { TemplateCopyProvider } from '#/components/foundations/template-copy/template-copy'
 import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
-import { loginConfigQuery } from '#/lib/api'
+import { clearUserCaches, loginConfigQuery } from '#/lib/api'
 
 import { translateAuth } from './login'
 
@@ -23,8 +23,7 @@ const rootApi = getRouteApi('__root__')
 
 export const Route = createFileRoute('/register')({
   head: () => ({ meta: [{ title: '注册' }] }),
-  loader: ({ context }) =>
-    context.queryClient.ensureQueryData(loginConfigQuery),
+  loader: ({ context }) => context.queryClient.query(loginConfigQuery),
   component: RegisterPage,
 })
 
@@ -74,7 +73,7 @@ function RegisterPage() {
       toast.error(error.message ?? '注册失败，请稍后重试')
       return
     }
-    queryClient.clear()
+    clearUserCaches(queryClient)
     await router.invalidate()
     if (verificationRequired && !result.user.emailVerified) {
       await navigate({ to: '/verify-email' })

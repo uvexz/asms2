@@ -17,6 +17,7 @@ import {
   adminListWebhookEventsFn,
 } from '#/server/fns/admin'
 import { formatDateTime, unwrap } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 
 export const Route = createFileRoute('/admin/logs')({
   head: () => ({ meta: [{ title: '日志 · 管理后台' }] }),
@@ -32,13 +33,13 @@ function AdminLogs() {
   const [offset, setOffset] = useState(0)
 
   const audit = useQuery({
-    queryKey: ['admin', 'audit', offset],
+    queryKey: queryKeys.admin.audit(offset),
     queryFn: async () =>
       unwrap(await adminListAuditFn({ data: { limit: PAGE_SIZE, offset } })),
     enabled: tab === 'audit',
   })
   const events = useQuery({
-    queryKey: ['admin', 'webhook-events', offset],
+    queryKey: queryKeys.admin.webhookEvents(offset),
     queryFn: async () =>
       unwrap(
         await adminListWebhookEventsFn({ data: { limit: PAGE_SIZE, offset } }),
@@ -46,7 +47,7 @@ function AdminLogs() {
     enabled: tab === 'webhook',
   })
   const unrouted = useQuery({
-    queryKey: ['admin', 'unrouted', offset],
+    queryKey: queryKeys.admin.unrouted(offset),
     queryFn: async () =>
       unwrap(await adminListUnroutedFn({ data: { limit: 50, offset } })),
     enabled: tab === 'unrouted',

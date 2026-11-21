@@ -12,6 +12,7 @@ import { ErrorState } from '#/components/application/errors/error-state'
 import { PageSection } from '#/components/admin/ui'
 import { adminGetSettingsFn, adminUpdateSettingsFn } from '#/server/fns/admin'
 import { unwrap } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 import { isValidTimeZone } from '#/lib/timezone'
 import type { SiteSettings } from '#/server/settings'
 
@@ -82,7 +83,7 @@ function AdminSite() {
   const router = useRouter()
   const queryClient = useQueryClient()
   const query = useQuery({
-    queryKey: ['admin', 'site'],
+    queryKey: queryKeys.admin.site,
     queryFn: async () => unwrap(await adminGetSettingsFn()),
   })
   const [form, setForm] = useState<SiteSettings | null>(null)
@@ -160,8 +161,10 @@ function AdminSite() {
       toast.success('站点配置已保存')
       // 根 loader 的站点信息在 SPA 内是陈旧快照，保存后主动刷新，
       // 否则侧栏站名要等整页刷新才更新
-      queryClient.setQueryData(['admin', 'site'], result.data)
-      await queryClient.invalidateQueries({ queryKey: ['public-login-config'] })
+      queryClient.setQueryData(queryKeys.admin.site, result.data)
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.publicLoginConfig,
+      })
       await router.invalidate()
     } catch (error) {
       // 校验失败由 server fn 的 validator 抛出，不会走 result 分支
