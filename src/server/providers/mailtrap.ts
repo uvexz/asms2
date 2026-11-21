@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
 import { asRecord, asString, mapInboundAttachments } from './email-event'
 import { requestJson, trimBaseUrl } from './http'
@@ -468,8 +468,10 @@ export const mailtrapProvider: MailProvider = {
       })
     }
 
+    // 缺 event_id 时用「请求体哈希:序号」兜底；固定前缀会让后续批次与首批撞键被当成重复丢弃
+    const fallbackId = `mailtrap:${createHash('sha256').update(rawBody).digest('hex').slice(0, 32)}`
     return events.map((event, index) =>
-      normalizeEvent(event, index, 'mailtrap'),
+      normalizeEvent(event, index, fallbackId),
     )
   },
 

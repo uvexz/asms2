@@ -61,6 +61,19 @@ export async function getSiteSettings(force = false): Promise<SiteSettings> {
   }
 }
 
+/**
+ * 站点开启「必须验证邮箱」时，未验证账号不得使用收发、API Key、Telegram 等业务能力。
+ * 这里只看数据库里的 emailVerified 与站点开关，不依赖请求上下文，
+ * 供 API Key 鉴权、Telegram 机器人等非浏览器入口复用。
+ */
+export async function isEmailVerificationSatisfied(
+  emailVerified: boolean | null | undefined,
+): Promise<boolean> {
+  if (emailVerified) return true
+  const settings = await getSiteSettings()
+  return !settings.emailVerificationRequired
+}
+
 /** 对外公开的站点信息，绝不包含密钥类字段 */
 export async function getPublicSiteConfig() {
   const s = await getSiteSettings()

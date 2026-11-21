@@ -8,6 +8,8 @@ import { Input } from '#/components/base/input/input'
 import { toast } from '#/components/base/toast/toast'
 import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
+import { usePowHeaders } from '#/lib/pow-client'
+import { PowStatusLine } from '#/components/application/auth/pow-status'
 import { loginConfigQuery } from '#/lib/api'
 
 export const Route = createFileRoute('/forgot-password')({
@@ -23,6 +25,7 @@ function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [sentTo, setSentTo] = useState<string | null>(null)
+  const pow = usePowHeaders()
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -36,6 +39,7 @@ function ForgotPasswordPage() {
     const { error } = await authClient.requestPasswordReset({
       email: address,
       redirectTo: '/reset-password',
+      fetchOptions: { headers: await pow.getHeaders() },
     })
     setLoading(false)
     if (error) {
@@ -149,6 +153,11 @@ function ForgotPasswordPage() {
               >
                 {loading ? '发送中…' : '发送重置邮件'}
               </Button>
+              <PowStatusLine
+                status={pow.status}
+                onRetry={pow.retry}
+                className="justify-center"
+              />
             </form>
             <Link
               to="/login"

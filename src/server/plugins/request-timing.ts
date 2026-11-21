@@ -18,6 +18,24 @@ const requestIds = new WeakMap<object, { id: string; startedAt: number }>()
 /** 只记录超过该阈值（毫秒）的成功请求，避免轮询把日志刷满 */
 const SLOW_REQUEST_MS = 1_000
 
+/**
+ * 全站安全响应头。只放不影响脚本加载的部分：
+ *   - frame-ancestors / X-Frame-Options：禁止被他站嵌套（防点击劫持）；
+ *     邮件正文是 srcdoc iframe，不受影响；
+ *   - 页面的完整 nonce 版 CSP 由 src/server/security/csp.ts 在 SSR 时下发，
+ *     这里只给没有 CSP 的响应（API、静态资源、report-only 模式下的页面）兜底。
+ * HSTS 由 TLS 终结的 Nginx 下发，见 docs/deployment.md。
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  'content-security-policy':
+    "frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+  'x-frame-options': 'DENY',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'permissions-policy':
+    'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+}
+
 function requestIdFor(headers: Headers) {
   const incoming = headers.get('x-request-id')?.trim()
   return incoming && REQUEST_ID_RE.test(incoming) ? incoming : randomUUID()
@@ -44,6 +62,15 @@ export default definePlugin((nitroApp) => {
   })
 
   nitroApp.hooks.hook('response', (res, event) => {
+    try {
+      for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+        // 路由自己设置过的头（例如更严格的 CSP）优先
+        if (!res.headers.has(name)) res.headers.set(name, value)
+      }
+    } catch {
+      // 响应头不可变（已发送）时忽略
+    }
+
     const state = requestIds.get(event)
     if (!state) return
     requestIds.delete(event)

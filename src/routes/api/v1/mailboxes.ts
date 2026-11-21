@@ -22,16 +22,25 @@ export const Route = createFileRoute('/api/v1/mailboxes')({
     handlers: {
       GET: async ({ request }) => {
         try {
-          const { user } = await authenticateApiKey(request)
+          const { user, mailboxId: scoped } = await authenticateApiKey(request)
           const rows = await listMailboxes(user.id)
-          return Response.json({ ok: true, data: rows })
+          // Key 绑定单邮箱时只暴露该邮箱，避免枚举同账号下的其他地址
+          const data = scoped ? rows.filter((row) => row.id === scoped) : rows
+          return Response.json({ ok: true, data })
         } catch (error) {
           return fail(error)
         }
       },
       POST: async ({ request }) => {
         try {
-          const { user } = await authenticateApiKey(request)
+          const { user, mailboxId: scoped } = await authenticateApiKey(request)
+          if (scoped) {
+            throw new AppError(
+              'forbidden',
+              '该 API Key 绑定了单个邮箱，不能新建邮箱',
+              403,
+            )
+          }
           const body = (await request.json()) as {
             kind?: 'permanent' | 'temp'
             localPart?: string

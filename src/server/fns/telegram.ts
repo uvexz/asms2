@@ -10,6 +10,7 @@ import {
   clientIp,
   requireAdmin,
   requireUser,
+  requireVerifiedUser,
   userAgent,
 } from '#/server/auth/guards'
 import { encryptSecret, last4, decryptSecret } from '#/server/crypto/secret-box'
@@ -88,7 +89,7 @@ export const createTelegramBindCodeFn = createServerFn({
   method: 'POST',
 }).handler(async () =>
   attempt(async () => {
-    const user = await requireUser()
+    const user = await requireVerifiedUser()
     const runtime = await getTelegramRuntime()
     if (!runtime) {
       throw new AppError(

@@ -78,7 +78,14 @@ export const unroutedMessage = sqliteTable(
     toJson: text('to_json'),
     subject: text('subject'),
     reason: text('reason', {
-      enum: ['unknown', 'expired', 'domain_disabled'],
+      // 只是 TS 层枚举，SQLite 没有 CHECK 约束，新增取值无需迁移
+      enum: [
+        'unknown',
+        'expired',
+        'domain_disabled',
+        'mailbox_disabled',
+        'provider_mismatch',
+      ],
     }).notNull(),
     payloadJson: text('payload_json'),
     createdAt: integer('created_at', { mode: 'timestamp' })
@@ -115,4 +122,17 @@ export const auditLog = sqliteTable(
     index('audit_created_idx').on(table.createdAt),
     index('audit_actor_idx').on(table.actorUserId),
   ],
+)
+
+/**
+ * 已使用过的工作量证明题目（salt 即题目 ID）。用于防重放：
+ * 同一份解答只能用一次；过期后由 sweep 清理。
+ */
+export const powChallenge = sqliteTable(
+  'pow_challenge',
+  {
+    salt: text('salt').primaryKey(),
+    expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [index('pow_challenge_expires_idx').on(table.expiresAt)],
 )

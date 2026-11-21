@@ -5,7 +5,6 @@ import {
   gt,
   isNotNull,
   isNull,
-  like,
   lt,
   ne,
   or,
@@ -15,6 +14,7 @@ import {
 import { db } from '#/db/client'
 import { attachment, mailbox, message, messageBody } from '#/db/schema'
 import { AppError } from '#/server/errors'
+import { containsInsensitive } from '#/server/sql'
 
 import { getMailboxOrThrow } from './mailbox'
 
@@ -93,12 +93,12 @@ export async function listMessages(
     conditions.push(eq(message.mailboxId, filters.mailboxId))
   }
 
-  if (filters.q?.trim()) {
-    const pattern = `%${filters.q.trim().toLowerCase()}%`
+  const q = filters.q?.trim()
+  if (q) {
     conditions.push(
       or(
-        like(sql`lower(coalesce(${message.subject}, ''))`, pattern),
-        like(sql`lower(${message.fromAddress})`, pattern),
+        containsInsensitive(sql`coalesce(${message.subject}, '')`, q),
+        containsInsensitive(message.fromAddress, q),
       )!,
     )
   }
@@ -299,9 +299,15 @@ export async function updateMessage(
     throw new AppError('validation_failed', '没有需要更新的字段', 400)
   }
 
+  // 回收站保留期按「移入时间」计算：移入时打点，移出时清空
+  const trashPatch =
+    values.folder === undefined
+      ? {}
+      : { trashedAt: values.folder === 'trash' ? new Date() : null }
+
   const result = await db
     .update(message)
-    .set(values)
+    .set({ ...values, ...trashPatch })
     .where(
       and(
         eq(message.id, messageId),

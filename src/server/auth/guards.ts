@@ -5,6 +5,7 @@ import {
 } from '@tanstack/react-start/server'
 
 import { AppError } from '#/server/errors'
+import { isEmailVerificationSatisfied } from '#/server/settings'
 
 import { getAuth } from './index'
 
@@ -39,6 +40,22 @@ export async function requireUser(): Promise<SessionUser> {
     throw new AppError('unauthorized', '请先登录', 401)
   }
   return session.user
+}
+
+/**
+ * 业务入口用这个：站点要求邮箱验证时，未验证账号一律 403。
+ * 前端路由的 beforeLoad 跳转只是体验层，真正的拦截必须在服务端。
+ */
+export async function requireVerifiedUser(): Promise<SessionUser> {
+  const user = await requireUser()
+  if (await isEmailVerificationSatisfied(user.emailVerified)) return user
+
+  // cookieCache 可能还停留在验证前，拒绝之前用无缓存会话复核一次
+  const fresh = await getFreshSession().catch(() => null)
+  const freshUser = fresh?.user as unknown as SessionUser | undefined
+  if (freshUser?.emailVerified) return freshUser
+
+  throw new AppError('forbidden', '请先完成邮箱验证', 403)
 }
 
 export async function requireAdmin(): Promise<SessionUser> {

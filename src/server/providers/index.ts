@@ -6,6 +6,7 @@ import { plunkProvider } from './plunk'
 import { reloopProvider } from './reloop'
 import { resendProvider } from './resend'
 import { unitpostProvider } from './unitpost'
+import { ProviderError } from './types'
 import type { MailProvider, ProviderKind } from './types'
 
 export * from './types'
@@ -26,11 +27,15 @@ const registry: Record<ProviderKind, MailProvider> = {
 }
 
 export function getProvider(kind: ProviderKind): MailProvider {
-  // kind 来自数据库，运行时不保证落在联合类型内；缺表时回落到 resend。
-  return (
-    (registry as Record<string, MailProvider | undefined>)[kind] ??
-    registry.resend
-  )
+  // kind 来自数据库，运行时不保证落在联合类型内；未知类型直接报错，
+  // 不再静默回落到 resend（否则会拿别家的 Key 去调 Resend、用错误的方式验签）。
+  const provider = (registry as Record<string, MailProvider | undefined>)[kind]
+  if (!provider) {
+    throw new ProviderError(`未知的服务商类型：${String(kind)}`, {
+      code: 'unknown_provider',
+    })
+  }
+  return provider
 }
 
 export function listProviders(): MailProvider[] {

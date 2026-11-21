@@ -15,6 +15,8 @@ import { toast } from '#/components/base/toast/toast'
 import { TemplateCopyProvider } from '#/components/foundations/template-copy/template-copy'
 import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
+import { usePowHeaders } from '#/lib/pow-client'
+import { PowStatusLine } from '#/components/application/auth/pow-status'
 import { clearUserCaches, loginConfigQuery } from '#/lib/api'
 
 import { translateAuth } from './login'
@@ -34,6 +36,7 @@ function RegisterPage() {
   const { site } = rootApi.useLoaderData()
   const auth = Route.useLoaderData()
   const [loading, setLoading] = useState(false)
+  const pow = usePowHeaders()
 
   const emailEnabled = auth.emailPassword.enabled
   const verificationRequired = auth.emailPassword.verificationRequired
@@ -67,6 +70,7 @@ function RegisterPage() {
       password,
       name,
       callbackURL: '/mail',
+      fetchOptions: { headers: await pow.getHeaders() },
     })
     setLoading(false)
     if (error) {
@@ -151,6 +155,9 @@ function RegisterPage() {
           }
         />
       </TemplateCopyProvider>
+      {emailEnabled ? (
+        <PowStatusLine status={pow.status} onRetry={pow.retry} />
+      ) : null}
       {loading ? (
         <p className="text-caption-1-regular text-text-tertiary">
           正在创建账号…

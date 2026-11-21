@@ -1,7 +1,13 @@
 import { and, eq, sql } from 'drizzle-orm'
 
 import { db } from '#/db/client'
-import { mailbox, message, messageBody, telegramLink } from '#/db/schema'
+import {
+  mailbox,
+  message,
+  messageBody,
+  telegramLink,
+  user,
+} from '#/db/schema'
 import { getSiteSettings } from '#/server/settings'
 import { sendMessage, TelegramError } from './api'
 import type { InlineKeyboard } from './api'
@@ -33,13 +39,16 @@ export async function notifyInboundMessage(messageId: string): Promise<number> {
         createdAt: message.createdAt,
         address: mailbox.address,
         kind: mailbox.kind,
+        banned: user.banned,
       })
       .from(message)
       .innerJoin(mailbox, eq(mailbox.id, message.mailboxId))
+      .innerJoin(user, eq(user.id, message.userId))
       .where(eq(message.id, messageId))
       .limit(1)
   ).at(0)
-  if (!row) return 0
+  // 封禁账号的 Telegram 绑定不会被删除，这里停止推送
+  if (!row || row.banned) return 0
 
   const links = await db
     .select()

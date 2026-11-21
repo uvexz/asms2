@@ -79,7 +79,7 @@ src/routes / src/components  →  server/fns  →  server/{mail,webhooks,jobs,te
 
 ## 4. 服务端安全红线
 
-- 所有面板 server fn 第一行必须是 `requireUser()` 或 `requireAdmin()`；管理员路由还要在 `beforeLoad` 拦一次。
+- 所有面板 server fn 第一行必须是 `requireVerifiedUser()`（业务能力）、`requireUser()`（仅账号自身设置）或 `requireAdmin()`；管理员路由还要在 `beforeLoad` 拦一次。前端 `beforeLoad` 的跳转只是体验层，邮箱验证、封禁等拦截必须在服务端做；API Key 与 Telegram 入口同样要检查封禁与邮箱验证。
 - 任何查询都必须显式带 `userId`；跨资源操作先 `getMailboxOrThrow(userId, id)`。新增查询漏掉 userId 视为 bug。
 - 服务商 Key、OAuth Secret、Webhook Secret 只存 `encryptSecret()` 密文；接口只回末四位或 `hasSecret`，**永不回显明文**。
 - Webhook 必须验签 + 按 `(endpointId, providerEventId)` 去重；处理失败返回 5xx 让服务商重试，验签失败返回 401。
@@ -93,6 +93,7 @@ src/routes / src/components  →  server/fns  →  server/{mail,webhooks,jobs,te
 - **不要删列**：SQLite 删列会重建整表，`mailbox` 还引用 `domain`，风险高。废弃列保留并标 `@deprecated`，新增列用默认值。
 - 改 schema 流程：改 `src/db/schema/*` → `bun run db:generate` → **人工检查 SQL** → `bun run db:migrate`。需要回填时在迁移文件里追加 `UPDATE`。
 - 多表写入用 `db.batch([...])`；不要依赖远程交互式事务。
+- **不要依赖 `ON DELETE CASCADE`**：libSQL 连接池只有首个连接开了 `foreign_keys`，Turso 也不保证。删邮件必须同时显式删除 `message_body` / `attachment`（复用 `sweep.ts` 的 `purgeMessages`）。
 
 ## 6. 业务规则
 

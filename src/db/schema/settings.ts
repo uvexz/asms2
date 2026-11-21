@@ -27,11 +27,19 @@ export const siteSettings = sqliteTable('site_settings', {
   })
     .notNull()
     .default(false),
+  /** 注册 / 密码登录 / 找回密码 / 重发验证邮件前要求浏览器完成工作量证明 */
+  captchaEnabled: integer('captcha_enabled', { mode: 'boolean' })
+    .notNull()
+    .default(true),
 
   defaultMailboxLimit: integer('default_mailbox_limit').notNull().default(5),
   defaultDailySendLimit: integer('default_daily_send_limit')
     .notNull()
     .default(5),
+  /** 新注册账号在这么多小时内不能发信（管理员除外）；0 表示不限制 */
+  newAccountSendCooldownHours: integer('new_account_send_cooldown_hours')
+    .notNull()
+    .default(24),
 
   permanentPrefixMin: integer('permanent_prefix_min').notNull().default(3),
   tempPrefixMin: integer('temp_prefix_min').notNull().default(8),

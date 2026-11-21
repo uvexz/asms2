@@ -14,6 +14,12 @@ export const MAX_LINKS_PER_USER = 3
 
 export type TelegramLinkRow = typeof telegramLink.$inferSelect
 
+/** 绑定行 + 所属账号的可用状态；机器人每次处理命令前都要看一眼 */
+export type TelegramLinkWithUser = TelegramLinkRow & {
+  userBanned: boolean
+  userEmailVerified: boolean
+}
+
 /** 生成一次性绑定码；同一用户只保留最新一个未使用的码 */
 export async function createBindCode(userId: string) {
   await db
@@ -50,7 +56,10 @@ export async function consumeBindCode(code: string): Promise<string | null> {
 
 export type BindChatResult =
   | { ok: true; link: TelegramLinkRow; email: string }
-  | { ok: false; reason: 'chat_taken' | 'link_limit' | 'user_missing' }
+  | {
+      ok: false
+      reason: 'chat_taken' | 'link_limit' | 'user_missing' | 'user_banned'
+    }
 
 export async function bindChat(params: {
   chatId: string
@@ -61,12 +70,13 @@ export async function bindChat(params: {
 
   const owner = (
     await db
-      .select({ id: user.id, email: user.email })
+      .select({ id: user.id, email: user.email, banned: user.banned })
       .from(user)
       .where(eq(user.id, userId))
       .limit(1)
   ).at(0)
   if (!owner) return { ok: false, reason: 'user_missing' }
+  if (owner.banned) return { ok: false, reason: 'user_banned' }
 
   const existing = (
     await db
@@ -115,16 +125,25 @@ export async function bindChat(params: {
 
 export async function getLinkByChat(
   chatId: string,
-): Promise<TelegramLinkRow | null> {
-  return (
-    (
-      await db
-        .select()
-        .from(telegramLink)
-        .where(eq(telegramLink.chatId, chatId))
-        .limit(1)
-    ).at(0) ?? null
-  )
+): Promise<TelegramLinkWithUser | null> {
+  const row = (
+    await db
+      .select({
+        link: telegramLink,
+        banned: user.banned,
+        emailVerified: user.emailVerified,
+      })
+      .from(telegramLink)
+      .innerJoin(user, eq(user.id, telegramLink.userId))
+      .where(eq(telegramLink.chatId, chatId))
+      .limit(1)
+  ).at(0)
+  if (!row) return null
+  return {
+    ...row.link,
+    userBanned: Boolean(row.banned),
+    userEmailVerified: Boolean(row.emailVerified),
+  }
 }
 
 export async function listLinks(userId: string): Promise<TelegramLinkRow[]> {

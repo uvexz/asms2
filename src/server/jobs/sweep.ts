@@ -4,9 +4,13 @@ import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core'
 
 import { db, isLocalDatabase } from '#/db/client'
 import {
+  attachment,
   dailyUsage,
+  powChallenge,
+  rateLimit,
   mailbox,
   message,
+  messageBody,
   session,
   telegramBindCode,
   telegramUpdate,
@@ -18,6 +22,8 @@ import { getSiteSettings } from '#/server/settings'
 
 const CHUNK_SIZE = 2_000
 const MAX_CHUNKS = 20
+/** 删邮件要按 id 列表同时删三张表，单批不宜过大（SQL 变量个数有限） */
+const MESSAGE_CHUNK_SIZE = 500
 const TEMP_MAILBOX_BATCH = 100
 const DELETED_MAILBOX_BATCH = 100
 const USAGE_RETENTION_DAYS = 90
@@ -36,6 +42,8 @@ export interface SweepStats {
   purgedSessions: number
   purgedVerifications: number
   purgedUsage: number
+  purgedPowChallenges: number
+  purgedRateLimits: number
 }
 
 /**
@@ -65,6 +73,35 @@ async function deleteInChunks(params: {
     const deleted = Number(result.rowsAffected)
     total += deleted
     if (deleted < chunk) break
+  }
+
+  return total
+}
+
+/**
+ * 删邮件时显式带上 message_body / attachment，不依赖 ON DELETE CASCADE：
+ * libSQL 连接池里只有首个连接执行过 PRAGMA foreign_keys=ON，远程 Turso 也不保证，
+ * 依赖级联会让正文（含 html_raw）以孤儿行残留，等于「删了但没删」。
+ */
+async function purgeMessages(where: SQL): Promise<number> {
+  let total = 0
+
+  for (let i = 0; i < MAX_CHUNKS; i += 1) {
+    const rows = await db
+      .select({ id: message.id })
+      .from(message)
+      .where(where)
+      .limit(MESSAGE_CHUNK_SIZE)
+    if (rows.length === 0) break
+
+    const ids = rows.map((row) => row.id)
+    await db.batch([
+      db.delete(attachment).where(inArray(attachment.messageId, ids)),
+      db.delete(messageBody).where(inArray(messageBody.messageId, ids)),
+      db.delete(message).where(inArray(message.id, ids)),
+    ])
+    total += ids.length
+    if (ids.length < MESSAGE_CHUNK_SIZE) break
   }
 
   return total
@@ -113,18 +150,16 @@ export async function sweep(): Promise<SweepStats> {
   let purgedMessages = 0
   if (staleTemp.length > 0) {
     const ids = staleTemp.map((item) => item.id)
-    const [deleted] = (await db.batch([
-      db.delete(message).where(inArray(message.mailboxId, ids)),
-      db
-        .update(mailbox)
-        .set({
-          status: 'deleted',
-          address: sql`${mailbox.address} || '#' || ${mailbox.id}`,
-          deletedAt: new Date(graceCutoff),
-        })
-        .where(inArray(mailbox.id, ids)),
-    ])) as { rowsAffected: number }[]
-    purgedMessages = Number(deleted.rowsAffected)
+    // 先删邮件（含正文/附件），再墓碑化邮箱；本轮没删完的由下方「已删除邮箱」分支继续
+    purgedMessages = await purgeMessages(inArray(message.mailboxId, ids))
+    await db
+      .update(mailbox)
+      .set({
+        status: 'deleted',
+        address: sql`${mailbox.address} || '#' || ${mailbox.id}`,
+        deletedAt: new Date(graceCutoff),
+      })
+      .where(inArray(mailbox.id, ids))
   }
 
   // 已删除邮箱：保留期与地址冷却期都结束后，先分块清空邮件，再删除墓碑。
@@ -162,24 +197,9 @@ export async function sweep(): Promise<SweepStats> {
   let purgedDeletedMessages = 0
   if (deletedMailboxes.length > 0) {
     const ids = deletedMailboxes.map((item) => item.id)
-    const idList = sql.join(
-      ids.map((id) => sql`${id}`),
-      sql`, `,
+    purgedDeletedMessages = await purgeMessages(
+      inArray(message.mailboxId, ids),
     )
-
-    for (let i = 0; i < MAX_CHUNKS; i += 1) {
-      const result = await db.run(sql`
-        delete from message
-        where id in (
-          select id from message
-          where mailbox_id in (${idList})
-          limit ${CHUNK_SIZE}
-        )
-      `)
-      const deleted = Number(result.rowsAffected)
-      purgedDeletedMessages += deleted
-      if (deleted < CHUNK_SIZE) break
-    }
 
     const remaining = await db
       .select({ id: message.id })
@@ -193,18 +213,13 @@ export async function sweep(): Promise<SweepStats> {
     }
   }
 
-  // 回收站保留
+  // 回收站保留：从移入回收站的时间算起（trashed_at），而不是收信时间
   const trashCutoff = new Date(
     now - settings.trashRetentionDays * 24 * 3600 * 1000,
   )
-  const purgedTrash = await deleteInChunks({
-    table: message,
-    key: message.id,
-    where: and(
-      eq(message.folder, 'trash'),
-      lt(message.receivedAt, trashCutoff),
-    )!,
-  })
+  const purgedTrash = await purgeMessages(
+    and(eq(message.folder, 'trash'), lt(message.trashedAt, trashCutoff))!,
+  )
 
   const unroutedCutoff = new Date(
     now - settings.orphanRetentionDays * 24 * 3600 * 1000,
@@ -261,6 +276,20 @@ export async function sweep(): Promise<SweepStats> {
     chunk: 1_000,
   })
 
+  // 防重放记录过期即可删；限流计数 1 天没动过的说明早已出了任何窗口
+  const purgedPowChallenges = await deleteInChunks({
+    table: powChallenge,
+    key: powChallenge.salt,
+    where: lt(powChallenge.expiresAt, new Date(now)),
+    chunk: 1_000,
+  })
+  const purgedRateLimits = await deleteInChunks({
+    table: rateLimit,
+    key: rateLimit.id,
+    where: lt(rateLimit.lastRequest, now - 24 * 3600 * 1000),
+    chunk: 1_000,
+  })
+
   await optimizePlanner()
 
   return {
@@ -277,5 +306,7 @@ export async function sweep(): Promise<SweepStats> {
     purgedSessions,
     purgedVerifications,
     purgedUsage,
+    purgedPowChallenges,
+    purgedRateLimits,
   }
 }

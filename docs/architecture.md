@@ -169,7 +169,7 @@ erDiagram
 | ------------------ | ------------------------------------------------------------------------------- | ----------------------------- |
 | `daily_usage`      | userId, usageDate, sentCount, receivedCount，UK(userId,usageDate)               | 日发件配额计数                |
 | `webhook_event`    | endpointId, providerEventId, type, status, payloadJson，UK(endpointId,eventId)  | 幂等去重 + 死信               |
-| `unrouted_message` | providerMessageId, from, to, subject, reason(`unknown/expired/domain_disabled`) | 无法投递的墓碑，默认保留 7 天 |
+| `unrouted_message` | providerMessageId, from, to, subject, reason(`unknown/expired/domain_disabled/mailbox_disabled/provider_mismatch`) | 无法投递的墓碑，默认保留 7 天 |
 | `audit_log`        | actorUserId, action, targetType, targetId, metaJson, ip, ua                     | 管理操作与管理员读信          |
 
 ### 3.3 关键索引与约束

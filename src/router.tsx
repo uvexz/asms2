@@ -1,17 +1,30 @@
 import { createRouter as createTanStackRouter } from '@tanstack/react-router'
+import { createIsomorphicFn } from '@tanstack/react-start'
 import { routeTree } from './routeTree.gen'
 
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query'
 
 import { ButtonLink } from '#/components/base/buttons/button'
+import { issueCspNonce } from '#/server/security/csp'
 import { getContext } from './integrations/tanstack-query/root-provider'
+
+/**
+ * 服务端：每次 SSR 生成一个 CSP nonce 并写进响应头；
+ * 客户端：返回 undefined，hydration 时 router 会从 <meta property="csp-nonce"> 读回同一个值。
+ * createIsomorphicFn 会在客户端构建里剔除服务端分支和它引用的模块。
+ */
+const getCspNonce = createIsomorphicFn()
+  .server(() => issueCspNonce())
+  .client(() => undefined)
 
 export function getRouter() {
   const context = getContext()
+  const nonce = getCspNonce()
 
   const router = createTanStackRouter({
     routeTree,
     context,
+    ssr: nonce ? { nonce } : undefined,
     scrollRestoration: true,
     defaultPreload: 'intent',
     defaultPreloadStaleTime: 0,

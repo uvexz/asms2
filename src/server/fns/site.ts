@@ -2,6 +2,7 @@ import { createServerFn } from '@tanstack/react-start'
 
 import { getPublicLoginConfig } from '#/server/auth/public-providers'
 import { getFreshSession, getSession } from '#/server/auth/guards'
+import { createPowChallenge } from '#/server/auth/pow'
 import { getPublicSiteConfig, getSiteSettings } from '#/server/settings'
 
 export const getPublicSiteFn = createServerFn({ method: 'GET' }).handler(
@@ -11,6 +12,18 @@ export const getPublicSiteFn = createServerFn({ method: 'GET' }).handler(
 export const getPublicLoginConfigFn = createServerFn({
   method: 'GET',
 }).handler(async () => getPublicLoginConfig())
+
+/**
+ * 签发一道工作量证明题目；站点关闭人机校验时返回 null。
+ * 用 POST：每次都是新题，不能被浏览器或中间层缓存。
+ */
+export const getPowChallengeFn = createServerFn({ method: 'POST' }).handler(
+  async () => {
+    const settings = await getSiteSettings()
+    if (!settings.captchaEnabled) return null
+    return createPowChallenge()
+  },
+)
 
 export const getSessionFn = createServerFn({ method: 'GET' }).handler(
   async () => {

@@ -85,6 +85,20 @@
       "when": 1795102424046,
       "tag": "0011_calm_doctor_faustus",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795274505241,
+      "tag": "0012_audit_trash_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795276595243,
+      "tag": "0013_abuse_controls",
+      "breakpoints": true
     }
   ]
 }

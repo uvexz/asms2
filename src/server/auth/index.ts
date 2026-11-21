@@ -8,7 +8,7 @@ import { APIError } from 'better-auth/api'
 import { admin } from 'better-auth/plugins'
 import { genericOAuth } from 'better-auth/plugins/generic-oauth'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 
 import { db } from '#/db/client'
 import * as schema from '#/db/schema'
@@ -16,6 +16,7 @@ import { decryptSecret } from '#/server/crypto/secret-box'
 import { getAuthConfigVersion, getSiteSettings } from '#/server/settings'
 
 import { sendPasswordResetEmail, sendVerificationEmail } from './mailer'
+import { powCaptcha } from './pow'
 
 export type AuthInstance = ReturnType<typeof betterAuth>
 
@@ -30,11 +31,17 @@ async function loadAuthProviders(): Promise<ProviderRow[]> {
   }
 }
 
-/** 首次启动时把 BOOTSTRAP_ADMIN_EMAIL 对应的账号提权（仅在无管理员时） */
-async function promoteBootstrapAdmin(userId?: string, email?: string) {
-  const target = process.env.BOOTSTRAP_ADMIN_EMAIL?.toLowerCase()
+/**
+ * 站内还没有管理员时，把 BOOTSTRAP_ADMIN_EMAIL 对应的账号提权。
+ *
+ * 安全约束：
+ *   - 只按邮箱精确匹配目标账号，绝不按「刚注册的这个人」提权；
+ *   - 站点开启邮箱验证时，目标账号必须已验证，避免抢注同名邮箱冒领管理员；
+ *   - 站点配置读取失败时不提权（fail closed），下次实例重建或账号更新时再试。
+ */
+async function promoteBootstrapAdmin() {
+  const target = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase()
   if (!target) return
-  if (email && email.toLowerCase() !== target) return
 
   const existing = await db
     .select({ id: schema.user.id })
@@ -43,10 +50,26 @@ async function promoteBootstrapAdmin(userId?: string, email?: string) {
     .limit(1)
   if (existing.length > 0) return
 
+  const candidate = (
+    await db
+      .select({
+        id: schema.user.id,
+        emailVerified: schema.user.emailVerified,
+      })
+      .from(schema.user)
+      .where(sql`lower(${schema.user.email}) = ${target}`)
+      .limit(1)
+  ).at(0)
+  if (!candidate) return
+
+  const settings = await getSiteSettings().catch(() => null)
+  if (!settings) return
+  if (settings.emailVerificationRequired && !candidate.emailVerified) return
+
   await db
     .update(schema.user)
     .set({ role: 'admin' })
-    .where(userId ? eq(schema.user.id, userId) : eq(schema.user.email, target))
+    .where(eq(schema.user.id, candidate.id))
 }
 
 async function buildAuth(): Promise<AuthInstance> {
@@ -101,7 +124,17 @@ async function buildAuth(): Promise<AuthInstance> {
   }
 
   const baseURL = process.env.BETTER_AUTH_URL ?? 'http://localhost:3000'
-  const plugins: unknown[] = [admin(), apiKey({ enableMetadata: true })]
+  const isDev = process.env.NODE_ENV === 'development'
+  const plugins: unknown[] = [
+    admin(),
+    // 注册 / 密码登录 / 找回密码 / 重发验证邮件前校验工作量证明，开关在站点配置
+    powCaptcha(),
+    apiKey({
+      enableMetadata: true,
+      // 插件默认是「每 Key 每天 10 次」；限流参数属于 server-only 字段，客户端创建时不能传
+      rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 120 },
+    }),
+  ]
   if (oauthConfigs.length > 0) {
     plugins.push(genericOAuth({ config: oauthConfigs as never }))
   }
@@ -122,7 +155,22 @@ async function buildAuth(): Promise<AuthInstance> {
     baseURL,
     secret: process.env.BETTER_AUTH_SECRET,
     database: drizzleAdapter(db, { provider: 'sqlite', schema }),
-    trustedOrigins: [baseURL, 'http://localhost:3000'],
+    // localhost 只在开发态信任，生产只认 BETTER_AUTH_URL
+    trustedOrigins: isDev ? [baseURL, 'http://localhost:3000'] : [baseURL],
+    // 按 IP 限流（依赖反代透传 X-Forwarded-For）；计数存在 rate_limit 表，多实例共享、重启不清零
+    rateLimit: {
+      enabled: !isDev,
+      storage: 'database' as const,
+      modelName: 'rateLimit',
+      window: 60,
+      max: 100,
+      customRules: {
+        '/sign-up/email': { window: 3600, max: 5 },
+        '/sign-in/email': { window: 60, max: 10 },
+        '/request-password-reset': { window: 3600, max: 5 },
+        '/send-verification-email': { window: 3600, max: 5 },
+      },
+    },
     emailAndPassword: {
       enabled: emailEnabled,
       minPasswordLength: 8,
@@ -216,11 +264,22 @@ async function buildAuth(): Promise<AuthInstance> {
             }
             return { data: newUser }
           },
-          after: async (newUser: { id: string; email: string }) => {
+          after: async () => {
             try {
-              await promoteBootstrapAdmin(newUser.id)
+              await promoteBootstrapAdmin()
             } catch {
               // 提权失败不影响注册主流程
+            }
+          },
+        },
+        update: {
+          // 开启邮箱验证时，管理员账号要等验证完成才会被提权
+          after: async (updated: { emailVerified?: boolean | null }) => {
+            if (!updated.emailVerified) return
+            try {
+              await promoteBootstrapAdmin()
+            } catch {
+              // 同上
             }
           },
         },

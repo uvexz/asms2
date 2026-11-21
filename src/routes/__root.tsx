@@ -2,6 +2,7 @@ import {
   HeadContent,
   Scripts,
   createRootRouteWithContext,
+  useRouter,
 } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
@@ -89,11 +90,18 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  // 生产环境有 nonce 版 CSP，内联脚本必须带上本次请求的 nonce 才会执行
+  const nonce = useRouter().options.ssr?.nonce
   return (
     <html lang="zh-CN">
       <head>
         {/* 阻塞式初始化：hydration 前确定明暗，避免暗色用户看到白屏闪烁 */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script
+          nonce={nonce}
+          // 浏览器会把 nonce 属性读成空串（防侧信道），hydration 比对必然不一致
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
         <HeadContent />
       </head>
       <body className="bg-background-full text-text-primary antialiased">

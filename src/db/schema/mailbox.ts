@@ -125,6 +125,8 @@ export const message = sqliteTable(
     sentAt: integer('sent_at', { mode: 'timestamp' }),
     receivedAt: integer('received_at', { mode: 'timestamp' }),
     errorMessage: text('error_message'),
+    /** 移入回收站的时间；回收站保留期从这里算，移出时置空 */
+    trashedAt: integer('trashed_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -143,6 +145,8 @@ export const message = sqliteTable(
       table.id,
     ),
     index('message_folder_received_idx').on(table.folder, table.receivedAt),
+    // 回收站清理按「移入时间」扫描
+    index('message_trash_idx').on(table.folder, table.trashedAt),
     // 未读数聚合只扫未读行：partial index 比全量 (mailbox, folder, is_read) 更小
     index('message_unread_idx')
       .on(table.mailboxId, table.folder, table.isRead)

@@ -5,6 +5,7 @@ import { user } from '#/db/schema'
 import type { SessionUser } from '#/server/auth/guards'
 import { getAuth } from '#/server/auth'
 import { AppError } from '#/server/errors'
+import { isEmailVerificationSatisfied } from '#/server/settings'
 
 /**
  * 对外 REST API 的鉴权：x-api-key → Better Auth apiKey 插件校验 → 用户。
@@ -51,6 +52,9 @@ export async function authenticateApiKey(
   if (!row || row.banned) {
     throw new AppError('forbidden', '账号不可用', 403)
   }
+  if (!(await isEmailVerificationSatisfied(row.emailVerified))) {
+    throw new AppError('forbidden', '请先在网页完成邮箱验证', 403)
+  }
 
   let mailboxId: string | undefined
   const metadata = result.key.metadata
@@ -66,6 +70,7 @@ export async function authenticateApiKey(
       name: row.name,
       image: row.image,
       role: row.role,
+      emailVerified: row.emailVerified,
       mailboxLimit: row.mailboxLimit,
       sendLimit: row.sendLimit,
     },

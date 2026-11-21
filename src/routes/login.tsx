@@ -14,6 +14,8 @@ import { toast } from '#/components/base/toast/toast'
 import { TemplateCopyProvider } from '#/components/foundations/template-copy/template-copy'
 import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
+import { usePowHeaders } from '#/lib/pow-client'
+import { PowStatusLine } from '#/components/application/auth/pow-status'
 import { clearUserCaches, loginConfigQuery } from '#/lib/api'
 
 export const DICT: Record<string, string> = {
@@ -63,6 +65,7 @@ function LoginPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [passkeyBusy, setPasskeyBusy] = useState(false)
+  const pow = usePowHeaders()
 
   const social: LoginSocialMethod[] = auth.social
   const emailEnabled = auth.emailPassword.enabled
@@ -89,6 +92,7 @@ function LoginPage() {
       email,
       password,
       callbackURL: '/mail',
+      fetchOptions: { headers: await pow.getHeaders() },
     })
     setLoading(false)
     if (error) {
@@ -184,6 +188,9 @@ function LoginPage() {
           }
         />
       </TemplateCopyProvider>
+      {emailEnabled ? (
+        <PowStatusLine status={pow.status} onRetry={pow.retry} />
+      ) : null}
       {loading ? (
         <p className="text-caption-1-regular text-text-tertiary">正在登录…</p>
       ) : null}

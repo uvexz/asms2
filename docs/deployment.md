@@ -48,12 +48,16 @@ server {
 
   client_max_body_size 12m;   # 发件附件上限 10MB，留余量
 
+  # HSTS 只能由 TLS 终结方下发；确认全站 https 后再加 preload
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
   location / {
     proxy_pass         http://127.0.0.1:3000;
     proxy_http_version 1.1;
     proxy_set_header   Host              $host;
     proxy_set_header   X-Real-IP         $remote_addr;
-    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    # 覆盖而不是追加：客户端自带的 X-Forwarded-For 不可信，限流与审计只认这一个 IP
+    proxy_set_header   X-Forwarded-For   $remote_addr;
     proxy_set_header   X-Forwarded-Proto $scheme;
     proxy_read_timeout 60s;
   }
@@ -61,6 +65,11 @@ server {
 ```
 
 - 必须透传 `X-Forwarded-For/Proto`，否则限流、审计与 OAuth 回调地址会出错。
+- 页面使用 nonce 版 CSP：每次 SSR 生成随机 nonce，`script-src` 只放行同源文件和带 nonce 的脚本（`src/server/security/csp.ts`）。不要在 Nginx / CDN 上缓存或改写 HTML 的 `Content-Security-Policy` 头，否则 nonce 对不上，页面脚本全部失效。
+- `CSP_MODE` 可选 `enforce`（默认）/ `report-only` / `off`。上线后若页面异常，先切 `report-only` 并在浏览器控制台看被拦截的资源。
+- 其余响应（API、静态资源）由 `src/server/plugins/request-timing.ts` 补 `frame-ancestors 'none'`、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy`、`Permissions-Policy`，Nginx 无需重复设置。
+- 登录 / 注册 / 找回密码按 IP 限流，计数存在 `rate_limit` 表，多实例共享、重启不清零；IP 取自 `X-Forwarded-For`，且 Better Auth 只接受**单个 IP** 的值（多个 IP 会落进一个共享桶）。所以 Nginx 要用 `$remote_addr` **覆盖**该头，不能用 `$proxy_add_x_forwarded_for` 追加。前面还有 CDN 时，改用 CDN 提供的真实 IP 头（如 `CF-Connecting-IP`），并配合 `set_real_ip_from` 只信任 CDN 回源地址。
+- 注册、密码登录、找回密码、重发验证邮件需要浏览器先完成工作量证明（站点设置里可关），依赖 `crypto.subtle`，所以站点必须走 HTTPS（localhost 除外）。
 - 若前面还有 CDN，确认 Webhook 路径没有被缓存或拦截（`/api/webhooks/*` 与 `/api/telegram/webhook` 应为 POST 直通）。
 - 构建会在 `public/assets` 下生成 gzip/brotli 预压缩文件，Nitro 会按 `Accept-Encoding` 直接返回；如需压缩 SSR HTML，可在 Nginx 额外开启 `gzip on; gzip_types text/html text/css application/javascript application/json;`。
 
@@ -94,6 +103,7 @@ turso db dump <db-name> > backup-$(date +%F).sql
 - 表结构只做加法：新列可空或有默认值，旧代码仍可运行。
 - 回滚 = 切回上一版镜像 + 必要时恢复备份；不要依赖"向下迁移"。
 - 密钥轮换（`SECRET_ENCRYPTION_KEY`）需要先解密再重加密，不能直接替换。
+- 从 0011 及更早版本升级：执行 `db:migrate`（0012 新增 `message.trashed_at`，存量回收站邮件从迁移时刻重新计算保留期），然后执行一次 `bunx tsx scripts/purge-orphans.ts`，清掉旧版 sweep 残留的孤儿正文与附件行。
 
 ## 6. 观测与排障
 
@@ -126,6 +136,9 @@ turso db dump <db-name> > backup-$(date +%F).sql
 ## 7. 上线检查清单
 
 - [ ] 环境变量齐全，`SECRET_ENCRYPTION_KEY` 已备份到密钥管理
+- [ ] 管理员账号已用 `BOOTSTRAP_ADMIN_EMAIL` 注册并提权成功；提权完成后可清空该变量
+- [ ] Nginx 已下发 HSTS
+- [ ] 生产构建下打开登录页、写信、查看一封 HTML 邮件，浏览器控制台无 CSP 报错
 - [ ] 已执行 `db:migrate`，并验证 `/login` 可打开
 - [ ] 已加服务商 Key、域名验证通过、Webhook 收到过事件
 - [ ] 管理员已注册 `admin@` 邮箱，保留前缀（`postmaster`、`abuse`、`noreply` 等）来信可正常转投

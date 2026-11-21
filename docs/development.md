@@ -59,13 +59,13 @@ src/routes / src/components → server/fns → server/{mail,webhooks,jobs} → p
 | `fns/mail.ts`  | `listMailboxesFn`、`createMailboxFn`、`removeMailboxFn`、`listDomainsFn`、`listMessagesFn`、`getMessageFn`、`updateMessageFn`、`sendMailFn`、`getQuotaFn` |
 | `fns/admin.ts` | `adminOverviewFn`、站点读写、域名 CRUD/验证、服务商 CRUD、Webhook CRUD、登录配置、用户管理、审计/事件/墓碑查询                                            |
 
-每个函数模样都一样：入参过 zod，首行 `requireUser()` 或 `requireAdmin()`，返回 `attempt()` 包过的 `{ ok, data | error }`。不这么写，前端那套 `unwrap()` 就接不住。
+每个函数模样都一样：入参过 zod，首行 `requireVerifiedUser()`（业务能力）、`requireUser()`（仅账号设置）或 `requireAdmin()`，返回 `attempt()` 包过的 `{ ok, data | error }`。不这么写，前端那套 `unwrap()` 就接不住。
 
 ## 5. 常见改动
 
 **加一个面板接口**
 
-1. 在 `src/server/fns/<域>.ts` 写 `createServerFn`，首行 `requireUser()` / `requireAdmin()`。
+1. 在 `src/server/fns/<域>.ts` 写 `createServerFn`，首行 `requireVerifiedUser()` / `requireAdmin()`。
 2. 用 `attempt()` 包住业务逻辑，返回 `{ ok, data | error }`。
 3. 入参用 zod schema `.validator()`。
 4. 客户端用 `unwrap()` 调用。

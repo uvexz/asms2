@@ -25,13 +25,16 @@ import { accountKind, accountLabel } from '#/server/auth/provider-labels'
 import type { LoginAccountKind } from '#/server/auth/provider-labels'
 import { invalidateAuthCache } from '#/server/auth'
 import { invalidatePublicLoginConfig } from '#/server/auth/public-providers'
+import { exemptExistingUsersFromVerification } from '#/server/auth/verification'
 import { encryptSecret, last4 } from '#/server/crypto/secret-box'
 import { AppError, attempt } from '#/server/errors'
 import { getProviderById } from '#/server/mail/provider-config'
 import { canSendSystemMail } from '#/server/mail/system'
+import { normalizeApiBaseUrl } from '#/server/mail/provider-url'
 import { getProvider } from '#/server/providers'
 import type { DnsRecord } from '#/server/providers'
 import { bumpAuthConfigVersion, getSiteSettings } from '#/server/settings'
+import { containsInsensitive } from '#/server/sql'
 import { isValidTimeZone } from '#/lib/timezone'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
@@ -110,6 +113,8 @@ const settingsPatchSchema = z.object({
   icpRecord: z.string().max(200).nullable().optional(),
   footerText: z.string().max(200).nullable().optional(),
   registrationEnabled: z.boolean().optional(),
+  captchaEnabled: z.boolean().optional(),
+  newAccountSendCooldownHours: z.number().int().min(0).max(720).optional(),
   defaultMailboxLimit: z.number().int().min(0).max(100).optional(),
   defaultDailySendLimit: z.number().int().min(0).max(1000).optional(),
   permanentPrefixMin: z.number().int().min(1).max(32).optional(),
@@ -536,7 +541,7 @@ export const adminCreateProviderFn = createServerFn({ method: 'POST' })
         label: data.label,
         apiKeyEnc: encryptSecret(data.apiKey),
         apiKeyLast4: last4(data.apiKey),
-        apiBaseUrl: data.apiBaseUrl ?? null,
+        apiBaseUrl: normalizeApiBaseUrl(data.apiBaseUrl) ?? null,
         externalAccountId: data.accountId?.trim() || null,
         capabilitiesJson: JSON.stringify(getProvider(data.kind).capabilities),
         isDefaultForSend: data.isDefaultForSend ?? false,
@@ -570,7 +575,32 @@ export const adminUpdateProviderFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) =>
     attempt(async () => {
       const actor = await requireAdmin()
-      const { id, apiKey, accountId, ...rest } = data
+      const { id, apiKey, accountId, apiBaseUrl: rawBaseUrl, ...rest } = data
+      const current = (
+        await db
+          .select({ apiBaseUrl: providerConfig.apiBaseUrl })
+          .from(providerConfig)
+          .where(eq(providerConfig.id, id))
+          .limit(1)
+      ).at(0)
+      if (!current) throw new AppError('not_found', '服务商不存在', 404)
+
+      const apiBaseUrl = normalizeApiBaseUrl(rawBaseUrl)
+      const currentBaseUrl =
+        current.apiBaseUrl?.trim().replace(/\/+$/, '') || null
+      // 只改地址、沿用旧 Key 会把已保存的 Key 发往新地址，等于变相回显明文
+      // （编辑表单每次都会带上地址，未改动时不应要求重填 Key）
+      if (
+        apiBaseUrl !== undefined &&
+        apiBaseUrl?.toLowerCase() !== currentBaseUrl?.toLowerCase() &&
+        !apiKey
+      ) {
+        throw new AppError(
+          'validation_failed',
+          '修改 API 基地址时请同时重新填写 API Key',
+        )
+      }
+
       if (rest.isDefaultForSend) {
         await db.update(providerConfig).set({ isDefaultForSend: false })
       }
@@ -578,6 +608,7 @@ export const adminUpdateProviderFn = createServerFn({ method: 'POST' })
         .update(providerConfig)
         .set({
           ...rest,
+          ...(apiBaseUrl !== undefined ? { apiBaseUrl } : {}),
           ...(accountId !== undefined
             ? { externalAccountId: accountId?.trim() || null }
             : {}),
@@ -587,7 +618,10 @@ export const adminUpdateProviderFn = createServerFn({ method: 'POST' })
           updatedAt: new Date(),
         })
         .where(eq(providerConfig.id, id))
-      await audit(actor.id, 'provider.update', 'provider', id)
+      await audit(actor.id, 'provider.update', 'provider', id, {
+        apiBaseUrlChanged: apiBaseUrl !== undefined,
+        apiKeyChanged: Boolean(apiKey),
+      })
       return { id }
     }),
   )
@@ -1008,11 +1042,8 @@ export const adminSetEmailVerificationFn = createServerFn({ method: 'POST' })
         .where(eq(siteSettings.id, 'default'))
 
       if (data.enabled) {
-        // 存量账号一律视为已验证，避免开启后被锁在门外；新注册用户从未验证开始
-        await db
-          .update(user)
-          .set({ emailVerified: true, updatedAt: new Date() })
-          .where(eq(user.emailVerified, false))
+        // 规则见 exemptExistingUsersFromVerification；存量密码用户需补一次验证
+        await exemptExistingUsersFromVerification()
       }
 
       await getSiteSettings(true)
@@ -1045,9 +1076,8 @@ export const adminListUsersFn = createServerFn({ method: 'POST' })
       await requireAdmin()
       const limit = data.limit ?? 50
       const offset = data.offset ?? 0
-      const conditions = data.q
-        ? sql`lower(${user.email}) like ${`%${data.q.toLowerCase()}%`}`
-        : undefined
+      const q = data.q?.trim()
+      const conditions = q ? containsInsensitive(user.email, q) : undefined
 
       const rows = await db
         .select({

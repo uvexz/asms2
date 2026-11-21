@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, lt, or, sql } from 'drizzle-orm'
 import { customAlphabet } from 'nanoid'
 
 import { db } from '#/db/client'
@@ -19,6 +19,22 @@ import type {
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
 
+/**
+ * 处理中的事件停在 received 超过这个时长，视为上次处理中途崩溃（进程重启、超时），
+ * 允许服务商重投时重新抢占；入库本身按 providerMessageId 幂等，重跑是安全的。
+ */
+const STALE_RECEIVED_MS = 5 * 60 * 1000
+
+/** 投递状态只允许单向推进，避免乱序到达的 delivery_delayed 把 delivered 改回 sent */
+const STATUS_RANK: Record<string, number> = {
+  sent: 1,
+  delivered: 2,
+  bounced: 3,
+  complained: 3,
+  failed: 3,
+  suppressed: 3,
+}
+
 export interface ProcessWebhookInput {
   providerKind: string
   endpointId: string
@@ -31,9 +47,9 @@ type ConfigRow = typeof providerConfig.$inferSelect
 
 /**
  * 抢占事件的处理权。
- * 新事件直接插入；已存在的行只有上次处理失败时才允许服务商重投重跑
- * （`attempts` 递增），processed / ignored / received 一律按重复丢弃，
- * 避免重复入库。
+ * 新事件直接插入；已存在的行只有上次处理失败、或停在 received 超过
+ * STALE_RECEIVED_MS（上次处理中途崩溃）时才允许服务商重投重跑（`attempts` 递增），
+ * processed / ignored 与仍在处理中的 received 一律按重复丢弃，避免重复入库。
  */
 async function claimEvent(params: {
   event: VerifiedWebhookEvent
@@ -61,7 +77,11 @@ async function claimEvent(params: {
   if (inserted.length > 0) return inserted[0].id
 
   const existingRows = await db
-    .select({ id: webhookEvent.id, status: webhookEvent.status })
+    .select({
+      id: webhookEvent.id,
+      status: webhookEvent.status,
+      receivedAt: webhookEvent.receivedAt,
+    })
     .from(webhookEvent)
     .where(
       and(
@@ -71,11 +91,18 @@ async function claimEvent(params: {
     )
     .limit(1)
   const existing = existingRows[0] as
-    Pick<typeof webhookEvent.$inferSelect, 'id' | 'status'> | undefined
+    | Pick<typeof webhookEvent.$inferSelect, 'id' | 'status' | 'receivedAt'>
+    | undefined
+  if (!existing) return null
 
-  if (!existing || existing.status !== 'failed') return null
+  const staleCutoff = new Date(Date.now() - STALE_RECEIVED_MS)
+  const reclaimable =
+    existing.status === 'failed' ||
+    (existing.status === 'received' &&
+      existing.receivedAt.getTime() < staleCutoff.getTime())
+  if (!reclaimable) return null
 
-  // 带上 status='failed' 条件更新：两次重投并发到达时只有一个能抢到
+  // 条件更新：两次重投并发到达时只有一个能抢到
   const reclaimed = await db
     .update(webhookEvent)
     .set({
@@ -84,10 +111,21 @@ async function claimEvent(params: {
       payloadJson,
       error: null,
       processedAt: null,
+      // 刷新时间戳，作为本次处理的「心跳」，供下一次判断是否卡死
+      receivedAt: new Date(),
       attempts: sql`${webhookEvent.attempts} + 1`,
     })
     .where(
-      and(eq(webhookEvent.id, existing.id), eq(webhookEvent.status, 'failed')),
+      and(
+        eq(webhookEvent.id, existing.id),
+        or(
+          eq(webhookEvent.status, 'failed'),
+          and(
+            eq(webhookEvent.status, 'received'),
+            lt(webhookEvent.receivedAt, staleCutoff),
+          ),
+        ),
+      ),
     )
     .returning({ id: webhookEvent.id })
 
@@ -139,6 +177,7 @@ async function handleEvent(params: {
     }
 
     if (event.kind === 'status') {
+      const rank = STATUS_RANK[event.data.status] ?? 1
       await db
         .update(message)
         .set({ status: event.data.status })
@@ -147,6 +186,13 @@ async function handleEvent(params: {
             eq(message.providerConfigId, config.id),
             eq(message.providerMessageId, event.data.providerMessageId),
             eq(message.direction, 'outbound'),
+            sql`(case ${message.status}
+              when 'delivered' then 2
+              when 'bounced' then 3
+              when 'complained' then 3
+              when 'failed' then 3
+              when 'suppressed' then 3
+              else 1 end) <= ${rank}`,
           ),
         )
       await markProcessed()

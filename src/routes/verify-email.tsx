@@ -10,6 +10,8 @@ import { Button } from '#/components/base/buttons/button'
 import { toast } from '#/components/base/toast/toast'
 import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
+import { usePowHeaders } from '#/lib/pow-client'
+import { PowStatusLine } from '#/components/application/auth/pow-status'
 
 export const Route = createFileRoute('/verify-email')({
   head: () => ({ meta: [{ title: '验证邮箱' }] }),
@@ -35,6 +37,7 @@ function VerifyEmailPage() {
   const { verified } = Route.useSearch()
   const [sending, setSending] = useState(false)
   const [cooldown, setCooldown] = useState(0)
+  const pow = usePowHeaders()
 
   useEffect(() => {
     if (cooldown <= 0) return
@@ -60,6 +63,7 @@ function VerifyEmailPage() {
     const { error } = await authClient.sendVerificationEmail({
       email: session?.email ?? '',
       callbackURL: '/verify-email?verified=1',
+      fetchOptions: { headers: await pow.getHeaders() },
     })
     setSending(false)
     if (error) {
@@ -110,6 +114,11 @@ function VerifyEmailPage() {
                 ? `${cooldown}s 后可重新发送`
                 : '重新发送验证邮件'}
           </Button>
+          <PowStatusLine
+            status={pow.status}
+            onRetry={pow.retry}
+            className="justify-center"
+          />
           <Button
             variant="ghost"
             className="w-full justify-center"

@@ -12,6 +12,7 @@
 - **换服务商不用换界面**：一个域名绑一家服务商，换掉之后地址、邮件、历史都不动。每个域名单独控制能不能新建长期或临时地址，也能单独关掉发信。
 - **管理后台**：站点配置、域名与 DNS、服务商 Key、Webhook、登录方式、用户、日志。
 - **登录**：邮箱密码（邮箱验证可开可关）、Google / GitHub / OIDC、Passkey、对外 API Key。找回密码走系统邮件通道。
+- **防滥用**：注册 / 登录 / 找回密码前浏览器做一次工作量证明（自托管，不依赖第三方），按 IP 限流（计数存库），新账号默认 24 小时后才能发信，页面下发 nonce 版 CSP。
 - **Telegram**：新邮件推到私聊，识别到验证码会单独拎出来；`/new` 直接在对话里开临时地址。只处理私聊，群组消息一律拒绝。
 - **对外 API**：`/api/v1/mailboxes`、`/api/v1/send`、`/api/v1/messages`，Key 鉴权，带限流。
 - **定时任务**：过期邮箱、回收站、墓碑、Webhook 事件、Telegram 去重记录的清理。
@@ -46,7 +47,7 @@ bun run dev                  # http://localhost:3000
 
 必须换的三个是 `BETTER_AUTH_SECRET`、`SECRET_ENCRYPTION_KEY`、`CRON_SECRET`，生成命令写在 [`.env.example`](./.env.example) 里。`DATABASE_URL` 默认指向本地 SQLite，也可以填 Turso 地址（另外要给 `DATABASE_AUTH_TOKEN`）。
 
-注册完，`BOOTSTRAP_ADMIN_EMAIL` 那个账号在站内还没有管理员时会自动提权。然后去 `/admin/providers` 填服务商 Key，`/admin/domains` 接域名。
+注册完，`BOOTSTRAP_ADMIN_EMAIL` 那个账号在站内还没有管理员时会自动提权（只认这个邮箱；开了邮箱验证就要等验证完成）。部署后请尽快用它注册，提权完成后可以把这个变量清空。然后去 `/admin/providers` 填服务商 Key，`/admin/domains` 接域名。
 
 管理员顺手把 `admin@<域名>` 注册了：`postmaster`、`abuse`、`noreply` 这些保留前缀的来信会统一转投到它，不建的话这些信按 unrouted 处理。
 

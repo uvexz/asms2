@@ -5,6 +5,7 @@ import { db } from '#/db/client'
 import {
   attachment,
   dailyUsage,
+  domain,
   mailbox,
   message,
   messageBody,
@@ -30,9 +31,16 @@ import { usageDateFor } from './quota'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
 
+export type UnroutedReason =
+  | 'unknown'
+  | 'expired'
+  | 'domain_disabled'
+  | 'mailbox_disabled'
+  | 'provider_mismatch'
+
 export type IngestOutcome =
   | { status: 'stored'; messageId: string }
-  | { status: 'unrouted'; reason: 'unknown' | 'expired' | 'domain_disabled' }
+  | { status: 'unrouted'; reason: UnroutedReason }
   | { status: 'duplicate' }
 
 function threadKeyFor(
@@ -55,7 +63,7 @@ async function recordUnrouted(params: {
   from: string
   to: string[]
   subject?: string | null
-  reason: 'unknown' | 'expired' | 'domain_disabled'
+  reason: UnroutedReason
   payload: unknown
 }) {
   const existing = await db
@@ -118,9 +126,9 @@ export async function ingestInbound(params: {
   const reservedWords = new Set(getReservedWords(settings))
   const adminFallback = new Map<string, string>()
   for (const item of recipients) {
-    const { localPart, domain } = splitMailboxAddress(item.address)
-    if (domain && reservedWords.has(localPart)) {
-      adminFallback.set(item.address, `admin@${domain}`)
+    const { localPart, domain: mailDomain } = splitMailboxAddress(item.address)
+    if (mailDomain && reservedWords.has(localPart)) {
+      adminFallback.set(item.address, `admin@${mailDomain}`)
     }
   }
 
@@ -128,12 +136,17 @@ export async function ingestInbound(params: {
     ...new Set([...addresses, ...adminFallback.values()]),
   ]
   const candidates = await db
-    .select()
+    .select({
+      mailbox,
+      domainProviderConfigId: domain.providerConfigId,
+      domainReceivingEnabled: domain.receivingEnabled,
+    })
     .from(mailbox)
+    .leftJoin(domain, eq(domain.id, mailbox.domainId))
     .where(inArray(mailbox.address, lookupAddresses))
 
-  const byAddress = new Map(candidates.map((row) => [row.address, row]))
-  const target = recipients
+  const byAddress = new Map(candidates.map((row) => [row.mailbox.address, row]))
+  const matched = recipients
     .map((item) => {
       const direct = byAddress.get(item.address)
       if (direct) return direct
@@ -142,34 +155,36 @@ export async function ingestInbound(params: {
     })
     .find(Boolean)
 
-  if (!target) {
+  const unrouted = async (reason: UnroutedReason): Promise<IngestOutcome> => {
     await recordUnrouted({
       providerConfigId,
       providerMessageId: data.providerMessageId,
       from: data.from,
       to: addresses,
       subject: data.subject,
-      reason: 'unknown',
+      reason,
       payload: data,
     })
-    return { status: 'unrouted', reason: 'unknown' }
+    return { status: 'unrouted', reason }
   }
+
+  if (!matched) return unrouted('unknown')
+  const target = matched.mailbox
+
+  // 一域一商：只接受域名当前绑定的服务商推来的邮件，
+  // 防止共享账号（如 Resend 团队级 Webhook）往本站任意域名注入来信
+  if (matched.domainProviderConfigId !== providerConfigId) {
+    return unrouted('provider_mismatch')
+  }
+  if (!matched.domainReceivingEnabled) return unrouted('domain_disabled')
+  if (target.status === 'disabled') return unrouted('mailbox_disabled')
 
   if (
     target.kind === 'temp' &&
     target.expiresAt !== null &&
     target.expiresAt.getTime() <= Date.now()
   ) {
-    await recordUnrouted({
-      providerConfigId,
-      providerMessageId: data.providerMessageId,
-      from: data.from,
-      to: addresses,
-      subject: data.subject,
-      reason: 'expired',
-      payload: data,
-    })
-    return { status: 'unrouted', reason: 'expired' }
+    return unrouted('expired')
   }
 
   // 幂等：同一服务商邮件 ID 只入库一次
@@ -197,7 +212,12 @@ export async function ingestInbound(params: {
     content.text ?? (sanitized ? sanitizedHtmlToText(sanitized) : '')
   const subject = data.subject ?? (headers['subject'] || '(无主题)')
   const from = parseAddress(data.from)
-  const receivedAt = data.receivedAt ? new Date(data.receivedAt) : new Date()
+  // 服务商给的时间串非法时退回当前时间，否则入库报错会让服务商无限重投
+  const parsedReceivedAt = data.receivedAt ? new Date(data.receivedAt) : null
+  const receivedAt =
+    parsedReceivedAt && Number.isFinite(parsedReceivedAt.getTime())
+      ? parsedReceivedAt
+      : new Date()
 
   const attachmentMetas =
     content.attachments && content.attachments.length > 0

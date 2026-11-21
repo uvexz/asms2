@@ -39,8 +39,9 @@ let pragmasReady: Promise<void> | null = null
  * 选项应用到每个池连接。synchronous / foreign_keys 是连接级参数，这里只
  * 覆盖首个连接，池中后续连接仍为默认值，但 WAL 已避免读写互斥。
  *
- * foreign_keys 显式打开：SQLite 默认关闭，关闭时 onDelete: 'cascade'
- * 不会生效，删用户/邮箱会留下孤儿行。
+ * foreign_keys 显式打开只是尽力而为：池中后续连接与远程 Turso 都不保证开启。
+ * 因此业务代码**不得依赖 ON DELETE CASCADE**——删邮件时必须显式删除
+ * message_body / attachment（见 server/jobs/sweep.ts 的 purgeMessages）。
  */
 export function ensurePragmas(): Promise<void> {
   if (!isLocal) return Promise.resolve()

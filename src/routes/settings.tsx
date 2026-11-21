@@ -30,6 +30,7 @@ import { ErrorState } from '#/components/application/errors/error-state'
 import { ThemeToggle } from '#/components/application/theme/theme-toggle'
 import { PageSection, KeyValue } from '#/components/admin/ui'
 import { authClient } from '#/lib/auth-client'
+import { usePowHeaders } from '#/lib/pow-client'
 import { loginConfigQuery, mailboxesQuery, quotaQuery, unwrap } from '#/lib/api'
 import { queryKeys } from '#/lib/query-keys'
 import { listSsoAccountsFn, unlinkSsoAccountFn } from '#/server/fns/account'
@@ -77,12 +78,7 @@ interface ApiKeyClient {
     data?: { apiKeys?: ApiKeyRow[] }
     error?: { message?: string }
   }>
-  create: (input: {
-    name: string
-    rateLimitEnabled?: boolean
-    rateLimitMax?: number
-    rateLimitTimeWindow?: number
-  }) => Promise<{
+  create: (input: { name: string }) => Promise<{
     data?: { key?: string; id?: string }
     error?: { message?: string }
   }>
@@ -139,12 +135,8 @@ function SettingsPage() {
   async function createKey() {
     setKeyLoading(true)
     const label = keyName.trim() || 'default'
-    const result = await apiKeyClient().create({
-      name: label,
-      rateLimitEnabled: true,
-      rateLimitMax: 120,
-      rateLimitTimeWindow: 60_000,
-    })
+    // 限流参数是 server-only 字段，由服务端插件统一配置（120 次/分钟）
+    const result = await apiKeyClient().create({ name: label })
     setKeyLoading(false)
     if (result.error || !result.data?.key) {
       toast.error(result.error?.message ?? '创建失败')
@@ -627,6 +619,8 @@ interface PasskeyRow {
 }
 
 function SecuritySection() {
+  // 重发验证邮件很少用到，点按钮时再现算，不在打开设置页时占 CPU
+  const pow = usePowHeaders(false)
   const authQuery = useQuery(loginConfigQuery)
   const { session } = Route.useRouteContext()
   const passkeyEnabled = authQuery.data?.passkey.enabled ?? false
@@ -692,6 +686,7 @@ function SecuritySection() {
     const { error } = await authClient.sendVerificationEmail({
       email: session?.email ?? '',
       callbackURL: '/verify-email?verified=1',
+      fetchOptions: { headers: await pow.getHeaders() },
     })
     setSending(false)
     if (error) {

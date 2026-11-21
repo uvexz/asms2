@@ -2,7 +2,13 @@ import { eq } from 'drizzle-orm'
 import { customAlphabet } from 'nanoid'
 
 import { db } from '#/db/client'
-import { attachment, mailbox, message, messageBody } from '#/db/schema'
+import {
+  attachment,
+  mailbox,
+  message,
+  messageBody,
+  user as userTable,
+} from '#/db/schema'
 import { AppError } from '#/server/errors'
 import { ProviderError } from '#/server/providers'
 import type { OutboundMessage } from '#/server/providers'
@@ -11,15 +17,19 @@ import { getSiteSettings } from '#/server/settings'
 import { parseAddressList } from '#/lib/email-address'
 import type { ParsedAddress } from '#/lib/email-address'
 
-import { makeSnippet, textToHtml } from './content'
+import { makeSnippet, sanitizeEmailHtml, textToHtml } from './content'
 import { getMailboxOrThrow } from './mailbox'
 import { resolveSendProviderForDomain } from './provider-config'
 import { refundSendQuota, reserveSendQuota, usageDateFor } from './quota'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/
+const CONTENT_TYPE_RE =
+  /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i
 const MAX_ATTACHMENTS = 3
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+/** to + cc + bcc 去重后的总人数上限；配额按封计，必须限制单封的扇出 */
 const MAX_RECIPIENTS = 20
 
 export interface SendMailInput {
@@ -31,24 +41,93 @@ export interface SendMailInput {
   text?: string
   html?: string
   attachments?: {
-    filename: string
-    content: string
+    /** 来自客户端载荷，运行期可能缺失，由 sendMail 内部逐项校验 */
+    filename?: string
+    content?: string
     contentType?: string
   }[]
 }
 
-function assertAddresses(list: ParsedAddress[], label: string) {
-  if (list.length === 0) {
-    throw new AppError('validation_failed', `请填写${label}`)
-  }
-  if (list.length > MAX_RECIPIENTS) {
-    throw new AppError('validation_failed', `${label}最多 ${MAX_RECIPIENTS} 个`)
-  }
+function assertAddressFormat(list: ParsedAddress[]) {
   for (const item of list) {
     if (!EMAIL_RE.test(item.address)) {
       throw new AppError('validation_failed', `收件地址不合法：${item.address}`)
     }
   }
+}
+
+function assertRecipients(
+  to: ParsedAddress[],
+  cc: ParsedAddress[],
+  bcc: ParsedAddress[],
+) {
+  if (to.length === 0) {
+    throw new AppError('validation_failed', '请填写收件人')
+  }
+  assertAddressFormat(to)
+  assertAddressFormat(cc)
+  assertAddressFormat(bcc)
+
+  const unique = new Set(
+    [...to, ...cc, ...bcc].map((item) => item.address.toLowerCase()),
+  )
+  if (unique.size > MAX_RECIPIENTS) {
+    throw new AppError(
+      'validation_failed',
+      `收件人、抄送、密送合计最多 ${MAX_RECIPIENTS} 个`,
+    )
+  }
+}
+
+/** 去掉路径分隔符与控制字符，避免服务商或收件端把文件名当路径解释 */
+function sanitizeFilename(name: string): string {
+  const cleaned = name
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[\\/]/g, '_')
+    .trim()
+    .slice(0, 200)
+  return cleaned || 'attachment'
+}
+
+function normalizeContentType(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  if (!CONTENT_TYPE_RE.test(trimmed)) {
+    throw new AppError('validation_failed', `附件类型不合法：${trimmed}`)
+  }
+  return trimmed.toLowerCase()
+}
+
+/**
+ * 新账号发信冷却：批量注册的小号拿到账号后不能立刻群发，
+ * 给管理员留出发现和封禁的时间。管理员不受限制；冷却设为 0 即关闭。
+ */
+async function assertSendCooldownPassed(
+  user: SessionUser,
+  cooldownHours: number,
+) {
+  if (cooldownHours <= 0 || user.role === 'admin') return
+
+  const row = (
+    await db
+      .select({ createdAt: userTable.createdAt })
+      .from(userTable)
+      .where(eq(userTable.id, user.id))
+      .limit(1)
+  ).at(0)
+  if (!row) throw new AppError('unauthorized', '账号不存在', 401)
+
+  const readyAt = row.createdAt.getTime() + cooldownHours * 3600 * 1000
+  const remainingMs = readyAt - Date.now()
+  if (remainingMs <= 0) return
+
+  const remainingHours = Math.ceil(remainingMs / 3600_000)
+  throw new AppError(
+    'forbidden',
+    `新注册账号需等待 ${cooldownHours} 小时后才能发信，还需约 ${remainingHours} 小时`,
+    403,
+  )
 }
 
 export async function sendMail(user: SessionUser, input: SendMailInput) {
@@ -57,6 +136,8 @@ export async function sendMail(user: SessionUser, input: SendMailInput) {
     getMailboxOrThrow(user.id, input.fromMailboxId),
   ])
 
+  await assertSendCooldownPassed(user, settings.newAccountSendCooldownHours)
+
   if (box.kind === 'temp' && !settings.allowTempSend) {
     throw new AppError('forbidden', '临时邮箱不支持发信', 403)
   }
@@ -64,7 +145,7 @@ export async function sendMail(user: SessionUser, input: SendMailInput) {
   const to = parseAddressList(input.to)
   const cc = parseAddressList(input.cc)
   const bcc = parseAddressList(input.bcc)
-  assertAddresses(to, '收件人')
+  assertRecipients(to, cc, bcc)
 
   const subject = (input.subject ?? '').trim() || '(无主题)'
   const text = input.text?.trim() ? input.text : undefined
@@ -72,10 +153,21 @@ export async function sendMail(user: SessionUser, input: SendMailInput) {
     throw new AppError('validation_failed', '邮件内容不能为空')
   }
 
-  const attachments = input.attachments ?? []
-  if (attachments.length > MAX_ATTACHMENTS) {
+  const rawAttachments = input.attachments ?? []
+  if (rawAttachments.length > MAX_ATTACHMENTS) {
     throw new AppError('validation_failed', `附件最多 ${MAX_ATTACHMENTS} 个`)
   }
+  const attachments = rawAttachments.map((item) => {
+    const content = (item.content ?? '').replace(/\s+/g, '')
+    if (!content || content.length % 4 !== 0 || !BASE64_RE.test(content)) {
+      throw new AppError('validation_failed', '附件内容必须是合法的 base64')
+    }
+    return {
+      filename: sanitizeFilename(String(item.filename ?? '')),
+      content,
+      contentType: normalizeContentType(item.contentType),
+    }
+  })
 
   let attachmentBytes = 0
   for (const item of attachments) {
@@ -182,7 +274,8 @@ export async function sendMail(user: SessionUser, input: SendMailInput) {
     db.insert(messageBody).values({
       messageId,
       htmlRaw: html,
-      htmlSanitized: html,
+      // 与收件同一条规则：入库展示用的 HTML 一律先净化
+      htmlSanitized: sanitizeEmailHtml(html),
       textBody: plain,
       headersJson: null,
     }),

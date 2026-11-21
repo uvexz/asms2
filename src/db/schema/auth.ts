@@ -175,3 +175,20 @@ export const apikey = sqliteTable(
     index('apikey_key_idx').on(table.key),
   ],
 )
+
+/**
+ * Better Auth 限流计数（rateLimit.storage = 'database'）。
+ * 存库而不是进程内存：多实例共享计数，重启也不会清零。
+ * 属性名必须与 Better Auth 的字段名一致（key / count / lastRequest）。
+ */
+export const rateLimit = sqliteTable(
+  'rate_limit',
+  {
+    id: text('id').primaryKey(),
+    key: text('key').notNull().unique(),
+    count: integer('count').notNull(),
+    /** 毫秒时间戳（Better Auth 约定），不是秒 */
+    lastRequest: integer('last_request').notNull(),
+  },
+  (table) => [index('rate_limit_last_request_idx').on(table.lastRequest)],
+)

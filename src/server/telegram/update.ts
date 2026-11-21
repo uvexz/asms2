@@ -10,7 +10,7 @@ import {
   removeMailbox,
 } from '#/server/mail/mailbox'
 import { getMessage, listMessages, markRead } from '#/server/mail/message'
-import { getSiteSettings } from '#/server/settings'
+import { getSiteSettings, isEmailVerificationSatisfied } from '#/server/settings'
 import {
   answerCallbackQuery,
   editMessageText,
@@ -41,8 +41,27 @@ import {
   MAX_LINKS_PER_USER,
   unbindChat,
 } from './link'
+import type { TelegramLinkWithUser } from './link'
 
 const MAX_LISTED_MAILBOXES = 8
+
+/** 不需要账号可用即可执行的命令：查看帮助、查看 chat_id、解绑 */
+const ALWAYS_ALLOWED_COMMANDS = new Set(['help', 'id', 'unbind'])
+
+/**
+ * 账号被封禁、或站点要求验证邮箱而账号未验证时，机器人只允许解绑。
+ * 网页端会话在封禁时会被撤销，Telegram 绑定不会，所以这里必须再拦一次。
+ */
+async function blockedReason(
+  link: TelegramLinkWithUser | null,
+): Promise<string | null> {
+  if (!link) return null
+  if (link.userBanned) return '该账号已被停用，机器人暂不可用。'
+  if (!(await isEmailVerificationSatisfied(link.userEmailVerified))) {
+    return '请先在网页完成邮箱验证，再使用机器人。'
+  }
+  return null
+}
 
 /**
  * Webhook 入口：去重 → 分发。
@@ -82,9 +101,10 @@ export async function handleTelegramUpdate(update: TgUpdate): Promise<void> {
     console.error('[telegram] update failed:', reason)
     await recordTelegramError(reason)
     if (chatId) {
+      // 内部错误原文只进日志与后台，不回显给 Telegram 用户
       await sendMessage(runtime.token, {
         chatId,
-        text: `处理失败：${escapeHtml(reason)}`,
+        text: '处理失败，请稍后重试。',
       }).catch(() => undefined)
     }
   }
@@ -119,6 +139,11 @@ async function handleMessage(runtime: TelegramRuntime, message: TgMessage) {
   const [rawCommand, ...args] = text.split(/\s+/)
   const command = rawCommand.slice(1).split('@')[0].toLowerCase()
   const link = await getLinkByChat(chatId)
+  const blocked = await blockedReason(link)
+  if (blocked && !ALWAYS_ALLOWED_COMMANDS.has(command)) {
+    await reply(runtime, chatId, blocked)
+    return
+  }
 
   switch (command) {
     case 'start':
@@ -259,7 +284,9 @@ async function handleBind(
         ? '该 Telegram 会话已绑定其他账号，请先在原账号解绑。'
         : result.reason === 'link_limit'
           ? `一个账号最多绑定 ${MAX_LINKS_PER_USER} 个 Telegram 会话。`
-          : '账号不存在或已被删除。'
+          : result.reason === 'user_banned'
+            ? '该账号已被停用，无法绑定。'
+            : '账号不存在或已被删除。'
     await reply(runtime, chatId, reason)
     return
   }
@@ -392,6 +419,13 @@ async function handleCallback(
       )
       return
     }
+    const blockedRead = await blockedReason(link)
+    if (blockedRead) {
+      await answerCallbackQuery(runtime.token, query.id, blockedRead).catch(
+        () => undefined,
+      )
+      return
+    }
     await markRead(link.userId, arg, true)
     await answerCallbackQuery(runtime.token, query.id, '已标记已读').catch(
       () => undefined,
@@ -404,6 +438,12 @@ async function handleCallback(
   const link = await getLinkByChat(chatId)
   if (!link) {
     await replaceMessage(runtime, chatId, messageId, NEED_BIND_TEXT)
+    return
+  }
+
+  const blocked = await blockedReason(link)
+  if (blocked && action !== 'unbind') {
+    await replaceMessage(runtime, chatId, messageId, blocked)
     return
   }
 
