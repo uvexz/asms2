@@ -14,12 +14,10 @@ import {
   listMailboxes,
   listSelectableDomains,
   removeMailbox,
-  updateMailboxProfile,
-  getMailboxOrThrow,
 } from '#/server/mail/mailbox'
 import { getMessage, listMessages, updateMessage } from '#/server/mail/message'
 import { getSendUsage, usageDateFor } from '#/server/mail/quota'
-import { sendMail, getOutboundRequestStatus } from '#/server/mail/send'
+import { sendMail } from '#/server/mail/send'
 import { getSiteSettings } from '#/server/settings'
 
 export const listMailboxesFn = createServerFn({ method: 'GET' })
@@ -59,21 +57,6 @@ export const removeMailboxFn = createServerFn({ method: 'POST' })
     attempt(async () => {
       const user = await requireVerifiedUser()
       return removeMailbox(user.id, data.id)
-    }),
-  )
-
-export const renameMailboxFn = createServerFn({ method: 'POST' })
-  .validator((data: unknown) =>
-    z
-      .object({ id: z.string(), displayName: z.string().max(60).nullable() })
-      .parse(data),
-  )
-  .handler(async ({ data }) =>
-    attempt(async () => {
-      const user = await requireVerifiedUser()
-      return updateMailboxProfile(user.id, data.id, {
-        displayName: data.displayName,
-      })
     }),
   )
 
@@ -127,27 +110,6 @@ export const sendMailFn = createServerFn({ method: 'POST' })
     attempt(async () => {
       const user = await requireVerifiedUser()
       return sendMail(user, data)
-    }),
-  )
-
-export const getSendStatusFn = createServerFn({ method: 'GET' })
-  .validator((data: unknown) =>
-    z
-      .object({
-        fromMailboxId: z.string(),
-        idempotencyKey: z.string().min(8).max(200),
-      })
-      .parse(data),
-  )
-  .handler(async ({ data }) =>
-    attempt(async () => {
-      const user = await requireVerifiedUser()
-      await getMailboxOrThrow(user.id, data.fromMailboxId)
-      return getOutboundRequestStatus(
-        user.id,
-        data.idempotencyKey,
-        data.fromMailboxId,
-      )
     }),
   )
 

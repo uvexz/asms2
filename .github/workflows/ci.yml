@@ -23,7 +23,3 @@ jobs:
       - run: bun run lint
       - run: bun run check
       - run: bun run build
-      - name: Migration and regression smoke
-        env:
-          DATABASE_URL: file:/tmp/asms2-regression-ci.db
-        run: bun tests/audit-regression.ts

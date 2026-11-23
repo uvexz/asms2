@@ -29,12 +29,6 @@ export const MENU_POPOVER_COMPACT = "rounded-[14px] p-1";
 
 export const MENU_ITEM_COMPACT = "px-2 py-1.5";
 
-/**
- * `DropdownDivider` bleeds through the default p-2.5 panel; in the compact
- * panel it bleeds through p-1 and sits in the rows' 4px gap on each side.
- */
-export const MENU_DIVIDER_COMPACT = "-mx-1 my-0";
-
 export const MENU_ITEMS_CONTAINER = "flex w-full flex-col gap-1 outline-none";
 
 export const MENU_ITEM = [

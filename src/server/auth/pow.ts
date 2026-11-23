@@ -113,11 +113,6 @@ export function createPowChallenge(
   }
 }
 
-/** 浏览器端提交的请求头是 base64(JSON(PowSolution)) */
-export function encodePowSolution(solution: PowSolution): string {
-  return Buffer.from(JSON.stringify(solution), 'utf8').toString('base64')
-}
-
 function decode(header: string): PowSolution | null {
   if (header.length > 2_000) return null
   try {

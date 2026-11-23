@@ -1,10 +1,3 @@
-import type { ErrorCode } from '#/server/errors'
-
-/** server fn 的错误码由 unwrap() 挂在 Error.code 上 */
-export interface CodedError extends Error {
-  code?: ErrorCode | string
-}
-
 /** 4xx 类错误重试也不会变好，直接失败让用户看到原因 */
 const NON_RETRYABLE = new Set<string>([
   'unauthorized',

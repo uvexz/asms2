@@ -6,16 +6,6 @@ import type {ReactNode} from "react";
 export type TemplateCopyTranslator = (text: string) => string;
 type CopySettings = { translate: TemplateCopyTranslator; render?: <T>(node: T) => T };
 const CopyContext = createContext<CopySettings | null>(null);
-const MenuContext = createContext<ReactNode>(null);
-
-/** Optional application language control shared by template account menus. */
-export function TemplateMenuProvider({ languageSelector, children }: { languageSelector?: ReactNode; children: ReactNode }) {
-  return <MenuContext.Provider value={languageSelector ?? null}>{children}</MenuContext.Provider>;
-}
-
-export function useTemplateLanguageSelector() {
-  return useContext(MenuContext);
-}
 
 /** Optional application copy for templates. Without a provider, source copy is unchanged. */
 export function TemplateCopyProvider({ translate, render, children }: CopySettings & { children: ReactNode }) {

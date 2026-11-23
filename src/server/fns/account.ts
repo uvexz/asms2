@@ -31,12 +31,6 @@ export interface SsoBindOption {
   kind: LoginAccountKind
 }
 
-export interface SsoOverview {
-  accounts: SsoAccountView[]
-  bindable: SsoBindOption[]
-  passkeyCount: number
-}
-
 async function countPasskeys(userId: string) {
   const rows = await db
     .select({ count: sql<number>`count(*)` })

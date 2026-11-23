@@ -314,18 +314,6 @@ export async function removeMailbox(userId: string, mailboxId: string) {
   return { id: row.id }
 }
 
-export async function updateMailboxProfile(
-  userId: string,
-  mailboxId: string,
-  patch: { displayName?: string | null },
-) {
-  const row = await getMailboxOrThrow(userId, mailboxId)
-  await db
-    .update(mailbox)
-    .set({ displayName: patch.displayName ?? null, updatedAt: new Date() })
-    .where(eq(mailbox.id, row.id))
-}
-
 export async function listSelectableDomains(kind: MailboxKind) {
   const rows = await db
     .select({

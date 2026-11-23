@@ -37,7 +37,3 @@ export function getProvider(kind: ProviderKind): MailProvider {
   }
   return provider
 }
-
-export function listProviders(): MailProvider[] {
-  return Array.from(new Set(Object.values(registry)))
-}

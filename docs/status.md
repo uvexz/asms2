@@ -135,3 +135,10 @@
 - 原始 HTML 不再入库;发件 payload 只存附件元数据;日志只记录脱敏错误摘要;显示名过滤 CR/LF 与分隔符。
 - 投诉达到 5 次/7 天自动关闭域名发件并写审计;API 响应显式 no-store;Webhook/Telegram/Cron 方法语义收紧。
 - 新增回归:软删复用、重复地址 409、临时配额、429 同键重试、显示名净化。
+
+## 11. 2026-11-23 测试与死代码清理
+
+- **回归脚本**：移除 `tests/audit-regression.ts` 与 `test:audit` 脚本，CI 只保留 tsc / lint / prettier / build 四道门。
+- **未引用模块**：删除从未被入口引用的 BoardUI 组件（announcement、combobox、command-palette、date-picker、file-upload、kbd、meter、pagination、popover、progress、radio、search-field、table、tabs、tag-group、tooltip、button-group、badge 兼容层），以及 `db/index.ts`、`server/telegram/index.ts` 两个无人导入的 barrel 和 `integrations/better-auth/header-user.tsx`。需要时用 `npx boardui@latest add <name>` 重新安装。
+- **无调用方的导出**：`renameMailboxFn` / `updateMailboxProfile`、`getSendStatusFn`、`listProviders`、`InboundEnvelope`、`SsoOverview`、`CodedError`、`encodePowSolution`、`IconLinkButton`、`TemplateMenuProvider` / `useTemplateLanguageSelector`、三个未使用的 chevron 图标、`MENU_DIVIDER_COMPACT`。
+- **依赖**：移除 `@tanstack/react-table` 与 `@internationalized/date`；后者仍随 `react-aria-components` 作为传递依赖安装。

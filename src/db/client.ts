@@ -63,5 +63,4 @@ if (isLocal) {
   await ensurePragmas()
 }
 
-export type Database = typeof db
 export { schema }

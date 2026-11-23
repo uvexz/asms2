@@ -55,18 +55,6 @@ export interface InboundAttachmentMeta {
   contentId?: string | null
 }
 
-export interface InboundEnvelope {
-  providerMessageId: string
-  from: EmailAddress
-  to: EmailAddress[]
-  cc: EmailAddress[]
-  bcc: EmailAddress[]
-  subject: string
-  receivedAt: Date
-  attachments: InboundAttachmentMeta[]
-  headers?: Record<string, string>
-}
-
 export interface InboundContent {
   html?: string
   text?: string
