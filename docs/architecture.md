@@ -140,11 +140,11 @@ erDiagram
 
 **站点（3 张）**
 
-| 表              | 关键字段                                                                                                                                                                                                                                                         | 说明                                                |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `site_settings` | 单行 `default`；站点资料、注册开关、`email_verification_required`、默认配额、前缀长度、`temp_ttl_minutes`（考察期）、`temp_grace_minutes`、冷却时长、`deleted_mailbox_retention_days`、`allow_temp_send`、时区（`admin_can_read_mail` 已废弃，仅为避免删列保留） | typed 单行配置，零散扩展放 `extra_json`             |
-| `auth_provider` | kind（email/google/github/oidc/passkey）、providerId(UK，运行时 ID 与回调路径段)、displayName、enabled、clientId、clientSecretEnc、issuer、scopes                                                                                                                | 登录方式配置，保存后触发 auth 实例重建；OIDC 可多条 |
-| `app_meta`      | key(PK), value                                                                                                                                                                                                                                                   | 配置版本号等                                        |
+| 表              | 关键字段                                                                                                                                                                                                                                                                                                                       | 说明                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| `site_settings` | 单行 `default`；站点资料、注册开关、`email_verification_required`、`email_domain_whitelist_enabled` / `_json`（注册域名白名单）、默认配额、前缀长度、`temp_ttl_minutes`（考察期）、`temp_grace_minutes`、冷却时长、`deleted_mailbox_retention_days`、`allow_temp_send`、时区（`admin_can_read_mail` 已废弃，仅为避免删列保留） | typed 单行配置，零散扩展放 `extra_json`             |
+| `auth_provider` | kind（email/google/github/oidc/passkey）、providerId(UK，运行时 ID 与回调路径段)、displayName、enabled、clientId、clientSecretEnc、issuer、scopes                                                                                                                                                                              | 登录方式配置，保存后触发 auth 实例重建；OIDC 可多条 |
+| `app_meta`      | key(PK), value                                                                                                                                                                                                                                                                                                                 | 配置版本号等                                        |
 
 **邮箱与邮件（4 张）**
 
@@ -330,6 +330,14 @@ Better Auth 的 `emailAndPassword` / `socialProviders` / 插件列表在实例�
 - 只影响邮箱密码注册的新用户；开启时会把存量用户回填为已验证，避免全员被锁。
 - 验证邮件复用站点服务商 + 已验证且开启发信的域名（发件人 `noreply@{hostname}`），不占用户配额。
 - 未验证用户仍可登录，但 `/mail`、`/settings`、`/admin` 会重定向到 `/verify-email`。
+
+注册域名白名单（`site_settings.email_domain_whitelist_enabled` / `_json`）：
+
+- 管理面板「登录设置 → 邮箱密码」维护，开启后只有列表内域名的邮箱能通过邮箱密码注册；已有账号登录、OAuth 注册不受影响。
+- 注册页在白名单开启时改为「前缀输入 + 后缀下拉」：用户只填 @ 之前的部分，后缀只能从列表里选，请求里的域名必然是白名单内的那一个（`AuthCard.emailField` 覆盖默认邮箱输入）。关闭白名单时恢复自由输入完整邮箱。
+- 判定点是 Better Auth 的全局 `hooks.before`，按路径命中 `/sign-up/email`，在写库前抛 403。页面上的预校验只是体验优化，直接调接口同样会被拒。
+- 匹配为精确域名：`example.com` 不放行 `mail.example.com`。归一（小写、去 `@` 前缀、去首尾点）在读写两侧都做，`src/lib/email-domain.ts` 是唯一口径。
+- 开启但列表为空 = 拒绝所有注册（fail closed）；面板保存时直接拒绝这种组合，让「开启」只可能带有可用域名。
 
 ## 6. 前端
 

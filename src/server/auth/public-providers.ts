@@ -2,6 +2,7 @@ import '#/server/env'
 
 import { db } from '#/db/client'
 import { authProvider } from '#/db/schema'
+import { parseStoredEmailDomains } from '#/lib/email-domain'
 import { canSendSystemMail } from '#/server/mail/system'
 import { isLoginMethodUsable } from '#/server/auth/provider-labels'
 import { getSiteSettings } from '#/server/settings'
@@ -20,6 +21,11 @@ export interface PublicLoginConfig {
     verificationRequired: boolean
     /** 是否已配置可发信的服务商与域名；未配置时验证/重置邮件发不出去 */
     canSend: boolean
+    /**
+     * 注册邮箱域名白名单。注册页据此提示可用后缀并做提交前预校验；
+     * 真正的判定在服务端 /sign-up/email 钩子里，这里只影响提示。
+     */
+    domainWhitelist: { enabled: boolean; domains: string[] }
   }
   social: PublicSocialProvider[]
   passkey: { enabled: boolean }
@@ -53,6 +59,10 @@ export async function getPublicLoginConfig(): Promise<PublicLoginConfig> {
         enabled: emailRow ? emailRow.enabled : false,
         verificationRequired: settings.emailVerificationRequired,
         canSend,
+        domainWhitelist: {
+          enabled: settings.emailDomainWhitelistEnabled,
+          domains: parseStoredEmailDomains(settings.emailDomainWhitelistJson),
+        },
       },
       social: rows
         .filter((row) => isLoginMethodUsable(row) && SOCIAL_KINDS.has(row.kind))

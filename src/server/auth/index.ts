@@ -4,7 +4,7 @@ import { apiKey } from '@better-auth/api-key'
 import { passkey } from '@better-auth/passkey'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { APIError } from 'better-auth/api'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { admin } from 'better-auth/plugins'
 import { genericOAuth } from 'better-auth/plugins/generic-oauth'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
@@ -12,9 +12,17 @@ import { eq, sql } from 'drizzle-orm'
 
 import { db } from '#/db/client'
 import * as schema from '#/db/schema'
+import {
+  emailDomainWhitelistMessage,
+  isEmailDomainAllowed,
+} from '#/lib/email-domain'
 import { decryptSecret } from '#/server/crypto/secret-box'
 import { logError } from '#/server/errors'
-import { getAuthConfigVersion, getSiteSettings } from '#/server/settings'
+import {
+  getAuthConfigVersion,
+  getRegistrationDomainPolicy,
+  getSiteSettings,
+} from '#/server/settings'
 
 import { sendPasswordResetEmail, sendVerificationEmail } from './mailer'
 import { powCaptcha } from './pow'
@@ -72,6 +80,34 @@ async function promoteBootstrapAdmin() {
     .set({ role: 'admin' })
     .where(eq(schema.user.id, candidate.id))
 }
+
+/**
+ * 注册邮箱域名白名单守卫。
+ *
+ * 挂在 better-auth 的全局 before 钩子上，按请求路径判定：只要目标是邮箱密码
+ * 注册端点，就在创建用户之前校验后缀。页面上的预校验只是体验优化，这里是
+ * 唯一判定点——直接调用 /sign-up/email 的脚本同样会被拒绝。
+ *
+ * 域名比较忽略大小写与首尾空格，且为精确匹配（example.com 不放行子域名）。
+ */
+const signUpEmailDomainGuard = createAuthMiddleware(async (ctx) => {
+  if (!ctx.path.endsWith('/sign-up/email')) return
+
+  // 配置读取失败时不拦截：站点配置自身故障不该把所有注册入口锁死，
+  // 与 registrationEnabled 读取失败时的策略保持一致。
+  const policy = await getRegistrationDomainPolicy().catch(() => null)
+  if (!policy?.enabled) return
+
+  const body = (ctx as unknown as { body?: { email?: unknown } }).body
+  const email = typeof body?.email === 'string' ? body.email : ''
+  // 缺失或格式错误的邮箱交给下游校验，别用域名提示掩盖真正的原因
+  if (!email.trim()) return
+  if (isEmailDomainAllowed(email, policy.domains)) return
+
+  throw new APIError('FORBIDDEN', {
+    message: emailDomainWhitelistMessage(policy.domains),
+  })
+})
 
 async function buildAuth(): Promise<AuthInstance> {
   const [rows, settings] = await Promise.all([
@@ -247,6 +283,10 @@ async function buildAuth(): Promise<AuthInstance> {
       },
     },
     socialProviders,
+    // 注册域名白名单在端点层拦截，早于用户写入数据库
+    hooks: {
+      before: signUpEmailDomainGuard,
+    },
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,

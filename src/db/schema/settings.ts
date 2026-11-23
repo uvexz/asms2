@@ -31,6 +31,17 @@ export const siteSettings = sqliteTable('site_settings', {
   captchaEnabled: integer('captcha_enabled', { mode: 'boolean' })
     .notNull()
     .default(true),
+  /**
+   * 邮箱密码注册的域名白名单开关。开启后只有命中白名单的邮箱可以注册；
+   * 关闭时不限制后缀。空列表 + 开启 = 拒绝所有注册（fail closed）。
+   */
+  emailDomainWhitelistEnabled: integer('email_domain_whitelist_enabled', {
+    mode: 'boolean',
+  })
+    .notNull()
+    .default(false),
+  /** 允许注册的邮箱域名，JSON 字符串数组；元素已归一为小写且不含 @ */
+  emailDomainWhitelistJson: text('email_domain_whitelist_json'),
 
   defaultMailboxLimit: integer('default_mailbox_limit').notNull().default(5),
   defaultDailySendLimit: integer('default_daily_send_limit')

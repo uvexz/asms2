@@ -72,6 +72,12 @@ export interface AuthCardProps {
    */
   showEmailForm?: boolean;
   /**
+   * Replaces the built-in email input, e.g. with a prefix field plus a picker
+   * for the suffixes the site allows. The node owns its own `name`, so the
+   * host reads whichever fields it rendered from `FormData`.
+   */
+  emailField?: ReactNode;
+  /**
    * Replaces the built-in provider buttons, e.g. with OIDC or passkey
    * methods that have no BrandBadge. Rendered below the divider.
    */
@@ -149,6 +155,7 @@ export function AuthCard({
   layout = "stacked",
   providers = ["google", "apple", "github"],
   showEmailForm = true,
+  emailField,
   methodsSlot,
   passkeyAutofill = false,
   title,
@@ -269,7 +276,9 @@ export function AuthCard({
           <Input name="name" label="Full name" placeholder="Ada Lovelace" isRequired />
         ) : null}
 
-        {verify ? null : (
+        {verify ? null : emailField ? (
+          emailField
+        ) : (
         <Input
           name="email"
           type="email"

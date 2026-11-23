@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 
 import { db } from '#/db/client'
 import { appMeta, siteSettings } from '#/db/schema'
+import { parseStoredEmailDomains } from '#/lib/email-domain'
 import { AppError } from '#/server/errors'
 
 export type SiteSettings = typeof siteSettings.$inferSelect
@@ -72,6 +73,24 @@ export async function isEmailVerificationSatisfied(
   if (emailVerified) return true
   const settings = await getSiteSettings()
   return !settings.emailVerificationRequired
+}
+
+/**
+ * 注册邮箱域名白名单策略。
+ *
+ * 读取时即时归一：数据库里即使存着历史脏数据（大小写、带 @、重复）也按
+ * 归一后的结果参与匹配，不让脏配置变成「放行一切」或「全部拒绝」。
+ * 开启但没有可用域名时**不**放开限制（fail closed），由注册钩子拒绝。
+ */
+export async function getRegistrationDomainPolicy(): Promise<{
+  enabled: boolean
+  domains: string[]
+}> {
+  const settings = await getSiteSettings()
+  return {
+    enabled: settings.emailDomainWhitelistEnabled,
+    domains: parseStoredEmailDomains(settings.emailDomainWhitelistJson),
+  }
 }
 
 /** 对外公开的站点信息，绝不包含密钥类字段 */

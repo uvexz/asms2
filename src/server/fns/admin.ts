@@ -39,6 +39,12 @@ import { getProvider } from '#/server/providers'
 import type { DnsRecord } from '#/server/providers'
 import { bumpAuthConfigVersion, getSiteSettings } from '#/server/settings'
 import { containsInsensitive } from '#/server/sql'
+import {
+  MAX_REGISTRATION_DOMAINS,
+  parseEmailDomainList,
+  parseStoredEmailDomains,
+  serializeEmailDomains,
+} from '#/lib/email-domain'
 import { isValidTimeZone } from '#/lib/timezone'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
@@ -890,6 +896,10 @@ export const adminListLoginMethodsFn = createServerFn({
         enabled: settings.emailVerificationRequired,
         canSend,
       },
+      emailDomainWhitelist: {
+        enabled: settings.emailDomainWhitelistEnabled,
+        domains: parseStoredEmailDomains(settings.emailDomainWhitelistJson),
+      },
     }
   }),
 )
@@ -1123,6 +1133,67 @@ export const adminSetEmailVerificationFn = createServerFn({ method: 'POST' })
         { enabled: data.enabled },
       )
       return { enabled: data.enabled }
+    }),
+  )
+
+/**
+ * 邮箱密码注册的域名白名单。
+ *
+ * 每次保存都整体重写列表（归一 + 去重后落库），避免增量接口出现
+ * 「面板显示已删、库里还留着」的偏差。开启但没有可用域名会在服务端拒绝：
+ * 让空配置只可能以「关闭」状态存在，注册钩子那里仍按 fail closed 兜底。
+ */
+const emailDomainWhitelistSchema = z.object({
+  enabled: z.boolean(),
+  domains: z.array(z.string().max(300)).max(MAX_REGISTRATION_DOMAINS),
+})
+
+export const adminSetEmailDomainWhitelistFn = createServerFn({ method: 'POST' })
+  .validator((data: unknown) => emailDomainWhitelistSchema.parse(data))
+  .handler(async ({ data }) =>
+    attempt(async () => {
+      const actor = await requireAdmin()
+      const { domains, invalid } = parseEmailDomainList(data.domains)
+
+      if (invalid.length > 0) {
+        const preview = invalid.slice(0, 3).join('、')
+        throw new AppError(
+          'validation_failed',
+          invalid.length > 3
+            ? `${preview} 等 ${invalid.length} 个域名格式不正确，请填写 example.com 这样的域名`
+            : `${preview} 格式不正确，请填写 example.com 这样的域名`,
+        )
+      }
+      if (domains.length === 0 && data.enabled) {
+        throw new AppError(
+          'validation_failed',
+          '启用白名单前请至少添加一个允许的邮箱域名',
+        )
+      }
+
+      // 单行配置不存在时先建默认行，否则 update 静默不生效
+      await getSiteSettings()
+      await db
+        .update(siteSettings)
+        .set({
+          emailDomainWhitelistEnabled: data.enabled,
+          emailDomainWhitelistJson: serializeEmailDomains(domains),
+          updatedAt: new Date(),
+          updatedBy: actor.id,
+        })
+        .where(eq(siteSettings.id, 'default'))
+
+      // 写后立刻回填缓存：注册钩子与登录页读取的都是这份配置
+      await getSiteSettings(true)
+      invalidatePublicLoginConfig()
+      await audit(
+        actor.id,
+        'login_method.email_domain_whitelist',
+        'site',
+        'default',
+        { enabled: data.enabled, domains },
+      )
+      return { enabled: data.enabled, domains }
     }),
   )
 

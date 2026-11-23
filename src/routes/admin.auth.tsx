@@ -4,6 +4,7 @@ import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   RiAddLine,
+  RiCloseLine,
   RiDeleteBinLine,
   RiEditLine,
   RiFingerprintLine,
@@ -30,11 +31,16 @@ import { toast } from '#/components/base/toast/toast'
 import { EmptyHint, PageSection } from '#/components/admin/ui'
 import { ErrorState } from '#/components/application/errors/error-state'
 import { unwrap } from '#/lib/api'
+import {
+  MAX_REGISTRATION_DOMAINS,
+  normalizeEmailDomain,
+} from '#/lib/email-domain'
 import { queryKeys } from '#/lib/query-keys'
 import {
   adminCreateLoginMethodFn,
   adminDeleteLoginMethodFn,
   adminListLoginMethodsFn,
+  adminSetEmailDomainWhitelistFn,
   adminSetEmailVerificationFn,
   adminUpdateLoginMethodFn,
 } from '#/server/fns/admin'
@@ -125,6 +131,7 @@ function AdminAuth() {
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<LoginMethodRow | null>(null)
   const [deleting, setDeleting] = useState<LoginMethodRow | null>(null)
+  const [whitelistSaving, setWhitelistSaving] = useState(false)
 
   const data = query.data
   const methods = data?.methods ?? []
@@ -179,6 +186,34 @@ function AdminAuth() {
     await refresh()
   }
 
+  /**
+   * 白名单每次变更都整体提交（开关 + 列表），服务端归一后再回填。
+   * 返回是否成功，面板据此决定要不要清空输入框。
+   */
+  async function saveWhitelist(
+    enabled: boolean,
+    domains: string[],
+  ): Promise<boolean> {
+    if (whitelistSaving) return false
+    setWhitelistSaving(true)
+    try {
+      const result = await adminSetEmailDomainWhitelistFn({
+        data: { enabled, domains },
+      })
+      if (!result.ok) {
+        toast.error(result.error.message)
+        return false
+      }
+      // 整个「提交 + 重新拉取」期间保持锁定：整体重写的语义下，
+      // 两次并发操作会让后一次用旧列表覆盖前一次。
+      await refresh()
+      toast.success('白名单配置已保存')
+      return true
+    } finally {
+      setWhitelistSaving(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <PageSection
@@ -228,7 +263,7 @@ function AdminAuth() {
                   .filter(Boolean)
                   .join(' · ')
               : method.kind === 'email'
-                ? `邮箱验证：${data?.emailVerification.enabled ? '开' : '关'}`
+                ? `邮箱验证：${data?.emailVerification.enabled ? '开' : '关'} · 注册白名单：${data?.emailDomainWhitelist.enabled ? '开' : '关'}`
                 : meta.hint
 
             return (
@@ -285,26 +320,40 @@ function AdminAuth() {
                 </div>
 
                 {method.kind === 'email' ? (
-                  <div className="flex flex-col gap-1 border-t border-separator-border pt-3">
-                    <label className="flex items-center justify-between gap-2">
-                      <span className="text-body-regular text-text-secondary">
-                        开启邮箱验证
-                      </span>
-                      <Switch
-                        isSelected={data?.emailVerification.enabled ?? false}
-                        onChange={(value) => void setVerification(value)}
-                        isDisabled={
-                          !data?.emailVerification.canSend &&
-                          !data?.emailVerification.enabled
+                  <>
+                    <div className="flex flex-col gap-1 border-t border-separator-border pt-3">
+                      <label className="flex items-center justify-between gap-2">
+                        <span className="text-body-regular text-text-secondary">
+                          开启邮箱验证
+                        </span>
+                        <Switch
+                          isSelected={data?.emailVerification.enabled ?? false}
+                          onChange={(value) => void setVerification(value)}
+                          isDisabled={
+                            !data?.emailVerification.canSend &&
+                            !data?.emailVerification.enabled
+                          }
+                          aria-label="开启邮箱验证"
+                        />
+                      </label>
+                      <p className="text-caption-1-regular text-text-tertiary">
+                        {data?.emailVerification.canSend
+                          ? '开启后未验证用户登录会被引导到验证页，验证前无法进入邮箱。'
+                          : '请先在「服务商」配置可发信的已验证域名，才能开启邮箱验证。'}
+                      </p>
+                    </div>
+
+                    <DomainWhitelistPanel
+                      whitelist={
+                        data?.emailDomainWhitelist ?? {
+                          enabled: false,
+                          domains: [],
                         }
-                      />
-                    </label>
-                    <p className="text-caption-1-regular text-text-tertiary">
-                      {data?.emailVerification.canSend
-                        ? '开启后未验证用户登录会被引导到验证页，验证前无法进入邮箱。'
-                        : '请先在「服务商」配置可发信的已验证域名，才能开启邮箱验证。'}
-                    </p>
-                  </div>
+                      }
+                      saving={whitelistSaving}
+                      onSave={saveWhitelist}
+                    />
+                  </>
                 ) : null}
               </div>
             )
@@ -343,6 +392,137 @@ function AdminAuth() {
         pendingLabel="删除中…"
         onConfirm={remove}
       />
+    </div>
+  )
+}
+
+/* -------------------------------------------------- email domain whitelist */
+
+interface EmailDomainWhitelistState {
+  enabled: boolean
+  domains: string[]
+}
+
+/**
+ * 邮箱密码注册的域名白名单。
+ *
+ * 每次操作立即落库（与上面的开关一致），管理员不会因为忘记点保存而丢配置。
+ * 空列表时禁止开启：服务端也会拒绝，这里只是提前给出提示。
+ */
+function DomainWhitelistPanel({
+  whitelist,
+  saving,
+  onSave,
+}: {
+  whitelist: EmailDomainWhitelistState
+  saving: boolean
+  onSave: (enabled: boolean, domains: string[]) => Promise<boolean>
+}) {
+  const [draft, setDraft] = useState('')
+  const [draftError, setDraftError] = useState<string | null>(null)
+
+  async function add() {
+    const raw = draft.trim()
+    if (!raw || saving) return
+    const domain = normalizeEmailDomain(raw)
+    if (!domain) {
+      setDraftError('请填写 example.com 或 @example.com 形式的域名')
+      return
+    }
+    if (whitelist.domains.includes(domain)) {
+      setDraftError('该域名已在白名单中')
+      return
+    }
+    if (whitelist.domains.length >= MAX_REGISTRATION_DOMAINS) {
+      setDraftError(`最多添加 ${MAX_REGISTRATION_DOMAINS} 个域名`)
+      return
+    }
+    setDraftError(null)
+    const ok = await onSave(whitelist.enabled, [...whitelist.domains, domain])
+    if (ok) setDraft('')
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-separator-border pt-3">
+      <label className="flex items-center justify-between gap-2">
+        <span className="text-body-regular text-text-secondary">
+          邮箱后缀白名单
+        </span>
+        <Switch
+          isSelected={whitelist.enabled}
+          onChange={(value) => void onSave(value, whitelist.domains)}
+          isDisabled={saving}
+          aria-label="启用邮箱后缀白名单"
+        />
+      </label>
+      <p className="text-caption-1-regular text-text-tertiary">
+        {whitelist.enabled
+          ? '已开启：只有下列域名的邮箱可以注册新账号，已有账号登录不受影响。'
+          : '未开启：任意邮箱后缀都可以注册。开启后仅白名单内的域名可以注册。'}
+        域名为精确匹配，子域名（如 mail.example.com）需要单独添加。
+      </p>
+
+      <form
+        className="flex items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void add()
+        }}
+      >
+        <Input
+          label="添加允许的域名"
+          placeholder="example.com"
+          value={draft}
+          onChange={(value) => {
+            setDraft(value)
+            setDraftError(null)
+          }}
+          inputDir="ltr"
+          isDisabled={saving}
+          isInvalid={Boolean(draftError)}
+          errorMessage={draftError ?? undefined}
+          className="flex-1"
+        />
+        <Button
+          type="submit"
+          variant="secondary"
+          leadingIcon={RiAddLine}
+          disabled={saving || !draft.trim()}
+        >
+          添加
+        </Button>
+      </form>
+
+      {whitelist.domains.length === 0 ? (
+        <EmptyHint>
+          还没有允许的域名。至少添加一个域名后才能开启白名单。
+        </EmptyHint>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {whitelist.domains.map((domain) => (
+            <span
+              key={domain}
+              className="inline-flex items-center gap-1 rounded-md bg-background-secondary-default py-1 ps-2 pe-1 text-caption-1-medium text-text-secondary"
+            >
+              <span dir="ltr">@{domain}</span>
+              <Button
+                variant="ghost"
+                size="xs"
+                aria-label={`移除 @${domain}`}
+                disabled={saving}
+                onClick={() => {
+                  void onSave(
+                    whitelist.enabled,
+                    whitelist.domains.filter((item) => item !== domain),
+                  )
+                }}
+              >
+                <RiCloseLine className="size-3.5" aria-hidden />
+              </Button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
