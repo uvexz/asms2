@@ -96,6 +96,19 @@ export const telegramUpdate = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp' })
       .default(sql`(unixepoch())`)
       .notNull(),
+    status: text('status', {
+      enum: ['processing', 'processed', 'failed'],
+    })
+      .notNull()
+      .default('processed'),
+    attempts: integer('attempts').notNull().default(1),
+    lastError: text('last_error'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
   },
-  (table) => [index('telegram_update_created_idx').on(table.createdAt)],
+  (table) => [
+    index('telegram_update_created_idx').on(table.createdAt),
+    index('telegram_update_status_idx').on(table.status, table.updatedAt),
+  ],
 )

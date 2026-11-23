@@ -10,6 +10,7 @@ import {
   rateLimit,
   mailbox,
   message,
+  outboundRequest,
   messageBody,
   session,
   telegramBindCode,
@@ -19,6 +20,11 @@ import {
   webhookEvent,
 } from '#/db/schema'
 import { getSiteSettings } from '#/server/settings'
+import { refundSendQuota } from '#/server/mail/quota'
+import {
+  softDeleteMailbox,
+  sweepMailboxQuota,
+} from '#/server/mail/mailbox-quota'
 
 const CHUNK_SIZE = 2_000
 const MAX_CHUNKS = 20
@@ -152,14 +158,17 @@ export async function sweep(): Promise<SweepStats> {
     const ids = staleTemp.map((item) => item.id)
     // 先删邮件（含正文/附件），再墓碑化邮箱；本轮没删完的由下方「已删除邮箱」分支继续
     purgedMessages = await purgeMessages(inArray(message.mailboxId, ids))
-    await db
-      .update(mailbox)
-      .set({
-        status: 'deleted',
-        address: sql`${mailbox.address} || '#' || ${mailbox.id}`,
-        deletedAt: new Date(graceCutoff),
-      })
+    const stale = await db
+      .select({ id: mailbox.id, address: mailbox.address })
+      .from(mailbox)
       .where(inArray(mailbox.id, ids))
+    for (const box of stale) {
+      await softDeleteMailbox({
+        id: box.id,
+        address: box.address,
+        deletedAt: graceCutoff,
+      })
+    }
   }
 
   // 已删除邮箱：保留期与地址冷却期都结束后，先分块清空邮件，再删除墓碑。
@@ -197,9 +206,7 @@ export async function sweep(): Promise<SweepStats> {
   let purgedDeletedMessages = 0
   if (deletedMailboxes.length > 0) {
     const ids = deletedMailboxes.map((item) => item.id)
-    purgedDeletedMessages = await purgeMessages(
-      inArray(message.mailboxId, ids),
-    )
+    purgedDeletedMessages = await purgeMessages(inArray(message.mailboxId, ids))
 
     const remaining = await db
       .select({ id: message.id })
@@ -290,7 +297,80 @@ export async function sweep(): Promise<SweepStats> {
     chunk: 1_000,
   })
 
+  // 发信请求：卡死的派发转 unknown（不自动重发），失败请求补退配额，
+  // 已完成/已明确失败的请求保留 7 天作为幂等窗口后清理。
+  const dispatchCutoff = new Date(now - 15 * 60 * 1000)
+  const stuck = await db
+    .select({
+      id: outboundRequest.id,
+      error: outboundRequest.error,
+    })
+    .from(outboundRequest)
+    .where(
+      and(
+        eq(outboundRequest.status, 'processing'),
+        lt(outboundRequest.updatedAt, dispatchCutoff),
+      ),
+    )
+  for (const request of stuck) {
+    await db
+      .update(outboundRequest)
+      .set({
+        status: 'uncertain',
+        error:
+          request.error ??
+          '派发超时，服务商可能已受理；请人工对账后再决定是否重发',
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(outboundRequest.id, request.id),
+          eq(outboundRequest.status, 'processing'),
+        ),
+      )
+  }
+
+  const refundable = await db
+    .select({
+      id: outboundRequest.id,
+      userId: outboundRequest.userId,
+      usageDate: outboundRequest.usageDate,
+    })
+    .from(outboundRequest)
+    .where(
+      and(
+        eq(outboundRequest.status, 'failed'),
+        eq(outboundRequest.quotaReserved, true),
+      ),
+    )
+  for (const request of refundable) {
+    const won = await db
+      .update(outboundRequest)
+      .set({ quotaReserved: false, updatedAt: new Date() })
+      .where(
+        and(
+          eq(outboundRequest.id, request.id),
+          eq(outboundRequest.quotaReserved, true),
+        ),
+      )
+      .returning({ id: outboundRequest.id })
+    if (won.length === 0) continue
+    await refundSendQuota(request.userId, request.usageDate).catch(
+      (error: unknown) => {
+        console.error('[sweep] refund failed:', error)
+      },
+    )
+  }
+
+  const requestRetentionCutoff = new Date(now - 7 * 24 * 3600 * 1000)
+  await db.run(sql`
+    delete from outbound_request
+    where status in ('succeeded', 'failed')
+      and updated_at < ${Math.floor(requestRetentionCutoff.getTime() / 1000)}
+  `)
+
   await optimizePlanner()
+  await sweepMailboxQuota()
 
   return {
     expiredMailboxes: Number(expired.rowsAffected),

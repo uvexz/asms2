@@ -31,6 +31,10 @@ import {
 import { updateMessageFn } from '#/server/fns/mail'
 import type { MailboxView } from '#/server/mail/mailbox'
 import { ErrorState } from '#/components/application/errors/error-state'
+import {
+  ScrollFade,
+  useScrollFade,
+} from '#/components/foundations/scroll-fade/scroll-fade'
 
 import { useCompose } from './compose-context'
 
@@ -60,6 +64,7 @@ export function MessageReader({
   const queryClient = useQueryClient()
   const { openCompose } = useCompose()
   const [allowImages, setAllowImages] = useState(false)
+  const fade = useScrollFade()
   const markUnreadId = useRef<string | null>(null)
   const autoReadId = useRef<string | null>(null)
 
@@ -68,7 +73,8 @@ export function MessageReader({
     setAllowImages(false)
     markUnreadId.current = null
     autoReadId.current = null
-  }, [messageId])
+    fade.reset()
+  }, [messageId, fade])
 
   const query = useQuery(messageQuery(messageId))
 
@@ -239,102 +245,105 @@ export function MessageReader({
         </span>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-4 p-5 lg:p-8">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-title-3-semibold text-text-primary">
-              {message.subject || '(无主题)'}
-            </h1>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption-1-regular text-text-tertiary">
-              <span className="text-body-medium text-text-secondary">
-                {message.fromName || message.fromAddress}
-              </span>
-              <span>&lt;{message.fromAddress}&gt;</span>
-              {message.to.length > 0 ? (
-                <span>发给 {message.to.join(', ')}</span>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Chip color="neutral">{message.mailboxAddress}</Chip>
-              <Chip color="blue">
-                {message.direction === 'inbound' ? '收件' : '发件'}
-              </Chip>
-              {message.attachments.length > 0 ? (
-                <Chip color="gray">{message.attachments.length} 个附件</Chip>
-              ) : null}
-            </div>
-          </div>
-
-          <Divider />
-
-          {message.attachments.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {message.attachments.map((file) => (
-                <span
-                  key={file.id}
-                  className="inline-flex items-center gap-2 rounded-lg border border-border-button-default px-3 py-2 text-caption-1-regular text-text-secondary"
-                >
-                  <RiAttachment2 className="size-4" aria-hidden />
-                  {file.filename}
-                  <span className="text-text-tertiary">
-                    {formatBytes(file.size)}
-                  </span>
+      <div className="relative min-h-0 flex-1">
+        <div onScroll={fade.onScroll} className="h-full overflow-y-auto">
+          <div className="flex flex-col gap-4 p-5 lg:p-8">
+            <div className="flex flex-col gap-1">
+              <h1 className="text-title-3-semibold text-text-primary">
+                {message.subject || '(无主题)'}
+              </h1>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption-1-regular text-text-tertiary">
+                <span className="text-body-medium text-text-secondary">
+                  {message.fromName || message.fromAddress}
                 </span>
-              ))}
+                <span>&lt;{message.fromAddress}&gt;</span>
+                {message.to.length > 0 ? (
+                  <span>发给 {message.to.join(', ')}</span>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Chip color="neutral">{message.mailboxAddress}</Chip>
+                <Chip color="blue">
+                  {message.direction === 'inbound' ? '收件' : '发件'}
+                </Chip>
+                {message.attachments.length > 0 ? (
+                  <Chip color="gray">{message.attachments.length} 个附件</Chip>
+                ) : null}
+              </div>
             </div>
-          ) : null}
 
-          {message.html ? (
-            <div className="overflow-hidden rounded-xl border border-separator-border">
-              {!allowImages ? (
-                <div className="flex items-center justify-between gap-3 border-b border-separator-border bg-background-tertiary-default px-4 py-2">
-                  <span className="text-caption-1-regular text-text-secondary">
-                    为保护隐私，远程图片已默认屏蔽
-                  </span>
-                  <Button
-                    size="small"
-                    variant="ghost"
-                    onClick={() => setAllowImages(true)}
+            <Divider />
+
+            {message.attachments.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {message.attachments.map((file) => (
+                  <span
+                    key={file.id}
+                    className="inline-flex items-center gap-2 rounded-lg border border-border-button-default px-3 py-2 text-caption-1-regular text-text-secondary"
                   >
-                    显示图片
-                  </Button>
-                </div>
-              ) : null}
-              <iframe
-                title="邮件正文"
-                sandbox="allow-popups"
-                srcDoc={srcDoc}
-                className="h-[60vh] w-full bg-white"
-              />
-            </div>
-          ) : (
-            <pre className="whitespace-pre-wrap break-words text-body-regular text-text-primary">
-              {message.text || '（无正文）'}
-            </pre>
-          )}
+                    <RiAttachment2 className="size-4" aria-hidden />
+                    {file.filename}
+                    <span className="text-text-tertiary">
+                      {formatBytes(file.size)}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
 
-          {message.direction === 'inbound' ? (
-            <div className="pt-2">
-              <Button
-                variant="secondary"
-                leadingIcon={RiCornerUpLeftLine}
-                disabled={!fromMailbox}
-                onClick={() => {
-                  if (!fromMailbox) return
-                  openCompose({
-                    fromMailboxId: fromMailbox.id,
-                    to: message.fromAddress,
-                    subject: message.subject?.startsWith('Re:')
-                      ? message.subject
-                      : `Re: ${message.subject ?? ''}`,
-                  })
-                }}
-              >
-                回复
-              </Button>
-            </div>
-          ) : null}
+            {message.html ? (
+              <div className="overflow-hidden rounded-xl border border-separator-border">
+                {!allowImages ? (
+                  <div className="flex items-center justify-between gap-3 border-b border-separator-border bg-background-tertiary-default px-4 py-2">
+                    <span className="text-caption-1-regular text-text-secondary">
+                      为保护隐私，远程图片已默认屏蔽
+                    </span>
+                    <Button
+                      size="small"
+                      variant="ghost"
+                      onClick={() => setAllowImages(true)}
+                    >
+                      显示图片
+                    </Button>
+                  </div>
+                ) : null}
+                <iframe
+                  title="邮件正文"
+                  sandbox="allow-popups"
+                  srcDoc={srcDoc}
+                  className="h-[60vh] w-full bg-white"
+                />
+              </div>
+            ) : (
+              <pre className="whitespace-pre-wrap break-words text-body-regular text-text-primary">
+                {message.text || '（无正文）'}
+              </pre>
+            )}
+
+            {message.direction === 'inbound' ? (
+              <div className="pt-2">
+                <Button
+                  variant="secondary"
+                  leadingIcon={RiCornerUpLeftLine}
+                  disabled={!fromMailbox}
+                  onClick={() => {
+                    if (!fromMailbox) return
+                    openCompose({
+                      fromMailboxId: fromMailbox.id,
+                      to: message.fromAddress,
+                      subject: message.subject?.startsWith('Re:')
+                        ? message.subject
+                        : `Re: ${message.subject ?? ''}`,
+                    })
+                  }}
+                >
+                  回复
+                </Button>
+              </div>
+            ) : null}
+          </div>
         </div>
+        <ScrollFade progress={fade.progress} />
       </div>
     </section>
   )

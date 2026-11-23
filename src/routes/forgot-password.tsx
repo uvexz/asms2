@@ -36,18 +36,23 @@ function ForgotPasswordPage() {
       return
     }
     setLoading(true)
-    const { error } = await authClient.requestPasswordReset({
-      email: address,
-      redirectTo: '/reset-password',
-      fetchOptions: { headers: await pow.getHeaders() },
-    })
-    setLoading(false)
-    if (error) {
-      toast.error(error.message ?? '发送失败，请稍后再试')
-      return
+    try {
+      const { error } = await authClient.requestPasswordReset({
+        email: address,
+        redirectTo: '/reset-password',
+        fetchOptions: { headers: await pow.getHeaders() },
+      })
+      if (error) {
+        toast.error(error.message ?? '发送失败，请稍后再试')
+        return
+      }
+      // 无论邮箱是否存在都展示同样的结果，避免枚举账号
+      setSentTo(address)
+    } catch {
+      toast.error('发送失败，请检查网络后重试')
+    } finally {
+      setLoading(false)
     }
-    // 无论邮箱是否存在都展示同样的结果，避免枚举账号
-    setSentTo(address)
   }
 
   return (
@@ -141,6 +146,8 @@ function ForgotPasswordPage() {
                 label="邮箱"
                 placeholder="you@company.com"
                 autoComplete="email"
+                autoCorrect="off"
+                spellCheck="false"
                 value={email}
                 onChange={setEmail}
                 isRequired

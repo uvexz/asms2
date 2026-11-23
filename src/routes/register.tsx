@@ -36,6 +36,7 @@ function RegisterPage() {
   const { site } = rootApi.useLoaderData()
   const auth = Route.useLoaderData()
   const [loading, setLoading] = useState(false)
+  const [socialBusy, setSocialBusy] = useState<string | null>(null)
   const pow = usePowHeaders()
 
   const emailEnabled = auth.emailPassword.enabled
@@ -60,37 +61,52 @@ function RegisterPage() {
   }
 
   async function handleSubmit(data: FormData) {
+    if (loading) return
     const email = String(data.get('email') ?? '')
     const password = String(data.get('password') ?? '')
     const name = String(data.get('name') ?? '') || email.split('@')[0]
 
     setLoading(true)
-    const { data: result, error } = await authClient.signUp.email({
-      email,
-      password,
-      name,
-      callbackURL: '/mail',
-      fetchOptions: { headers: await pow.getHeaders() },
-    })
-    setLoading(false)
-    if (error) {
-      toast.error(error.message ?? '注册失败，请稍后重试')
-      return
+    try {
+      const { data: result, error } = await authClient.signUp.email({
+        email,
+        password,
+        name,
+        callbackURL: '/mail',
+        fetchOptions: { headers: await pow.getHeaders() },
+      })
+      if (error) {
+        toast.error(error.message ?? '注册失败，请稍后重试')
+        return
+      }
+      clearUserCaches(queryClient)
+      await router.invalidate()
+      if (verificationRequired && !result.user.emailVerified) {
+        await navigate({ to: '/verify-email' })
+        return
+      }
+      await navigate({ to: '/mail', search: { folder: 'inbox' } })
+    } catch {
+      toast.error('注册失败，请检查网络后重试')
+    } finally {
+      setLoading(false)
     }
-    clearUserCaches(queryClient)
-    await router.invalidate()
-    if (verificationRequired && !result.user.emailVerified) {
-      await navigate({ to: '/verify-email' })
-      return
-    }
-    await navigate({ to: '/mail', search: { folder: 'inbox' } })
   }
 
   async function handleProvider(provider: string) {
-    await authClient.signIn.social({
-      provider,
-      callbackURL: '/mail',
-    })
+    if (socialBusy) return
+    setSocialBusy(provider)
+    try {
+      const { error } = await authClient.signIn.social({
+        provider,
+        callbackURL: '/mail',
+      })
+      if (error) toast.error(error.message ?? '发起注册失败，请稍后重试')
+    } catch {
+      toast.error('发起注册失败，请检查网络后重试')
+    } finally {
+      setSocialBusy(null)
+    }
   }
 
   async function handlePasskey() {
@@ -157,6 +173,9 @@ function RegisterPage() {
       </TemplateCopyProvider>
       {emailEnabled ? (
         <PowStatusLine status={pow.status} onRetry={pow.retry} />
+      ) : null}
+      {socialBusy ? (
+        <p className="text-caption-1-regular text-text-tertiary">正在跳转…</p>
       ) : null}
       {loading ? (
         <p className="text-caption-1-regular text-text-tertiary">

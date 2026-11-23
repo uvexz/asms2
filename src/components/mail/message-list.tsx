@@ -17,6 +17,10 @@ import { Skeleton } from '#/components/base/skeleton/skeleton'
 import { Spinner } from '#/components/base/spinner/spinner'
 import { toast } from '#/components/base/toast/toast'
 import { ErrorState } from '#/components/application/errors/error-state'
+import {
+  ScrollFade,
+  useScrollFade,
+} from '#/components/foundations/scroll-fade/scroll-fade'
 import { cx } from '#/utils/cx'
 import {
   formatTime,
@@ -40,6 +44,7 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
   const navigate = useNavigate({ from: '/mail' })
   const queryClient = useQueryClient()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const fade = useScrollFade()
   const lastRefreshRef = useRef(0)
 
   const filters = useMemo(
@@ -106,7 +111,8 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
   // 切换筛选条件后回到顶部，避免停留在上一个列表的滚动位置
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [filters.folder, filters.mailboxId, filters.q])
+    fade.reset()
+  }, [filters.folder, filters.mailboxId, filters.q, fade])
 
   const items = useMemo(() => {
     const seen = new Set<string>()
@@ -172,139 +178,151 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
         ) : null}
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        {query.isError ? (
-          <ErrorState
-            compact
-            title="邮件列表加载失败"
-            error={query.error}
-            onRetry={() => void query.refetch()}
-          />
-        ) : null}
-
-        {query.isLoading ? (
-          <div className="flex flex-col gap-3 p-4">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="flex flex-col gap-2">
-                <Skeleton className="h-3 w-1/3" />
-                <Skeleton className="h-3 w-3/4" />
-                <Skeleton className="h-3 w-1/2" />
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {!query.isLoading && !query.isError && items.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-            <RiInboxLine
-              className="size-10 text-foreground-icon-quaternary"
-              aria-hidden
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          onScroll={fade.onScroll}
+          className="h-full overflow-y-auto"
+        >
+          {query.isError ? (
+            <ErrorState
+              compact
+              title="邮件列表加载失败"
+              error={query.error}
+              onRetry={() => void query.refetch()}
             />
-            <p className="text-body-medium text-text-secondary">
-              这里还没有邮件
-            </p>
-            <p className="text-caption-1-regular text-text-tertiary">
-              {search.q
-                ? '换个关键词试试'
-                : search.folder === 'sent'
-                  ? '发出的邮件会显示在这里'
-                  : '收到的新邮件会自动出现在这里'}
-            </p>
-          </div>
-        ) : null}
+          ) : null}
 
-        <ul>
-          {items.map((item) => (
-            <li
-              key={item.id}
-              className="group relative border-b border-separator-border"
-            >
-              <button
-                type="button"
-                onClick={() => open(item.id)}
-                onMouseEnter={() => prefetch(item.id)}
-                onFocus={() => prefetch(item.id)}
-                aria-current={selectedId === item.id ? 'true' : undefined}
-                className={cx(
-                  'flex w-full cursor-pointer flex-col gap-1 px-4 py-3 text-start transition-colors',
-                  'outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus-ring',
-                  selectedId === item.id
-                    ? 'bg-accent-50'
-                    : 'hover:bg-background-secondary-hover',
-                )}
+          {query.isLoading ? (
+            <div className="flex flex-col gap-3 p-4">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="flex flex-col gap-2">
+                  <Skeleton className="h-3 w-1/3" />
+                  <Skeleton className="h-3 w-3/4" />
+                  <Skeleton className="h-3 w-1/2" />
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {!query.isLoading && !query.isError && items.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+              <RiInboxLine
+                className="size-10 text-foreground-icon-quaternary"
+                aria-hidden
+              />
+              <p className="text-body-medium text-text-secondary">
+                这里还没有邮件
+              </p>
+              <p className="text-caption-1-regular text-text-tertiary">
+                {search.q
+                  ? '换个关键词试试'
+                  : search.folder === 'sent'
+                    ? '发出的邮件会显示在这里'
+                    : '收到的新邮件会自动出现在这里'}
+              </p>
+            </div>
+          ) : null}
+
+          <ul>
+            {items.map((item) => (
+              <li
+                key={item.id}
+                className="group relative border-b border-separator-border"
               >
-                <span className="flex items-center gap-2 pe-6">
-                  <span
-                    className={cx(
-                      'min-w-0 flex-1 truncate text-body-medium',
-                      item.isRead
-                        ? 'text-text-secondary'
-                        : 'font-semibold text-text-primary',
-                    )}
-                  >
-                    {item.direction === 'outbound'
-                      ? `发给 ${item.to[0] ?? '（无收件人）'}`
-                      : item.fromName || item.fromAddress}
+                <button
+                  type="button"
+                  onClick={() => open(item.id)}
+                  onMouseEnter={() => prefetch(item.id)}
+                  onFocus={() => prefetch(item.id)}
+                  aria-current={selectedId === item.id ? 'true' : undefined}
+                  className={cx(
+                    'flex w-full cursor-pointer flex-col gap-1 px-4 py-3 text-start transition-colors',
+                    'outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus-ring',
+                    selectedId === item.id
+                      ? 'bg-accent-50'
+                      : 'hover:bg-background-secondary-hover',
+                  )}
+                >
+                  <span className="flex items-center gap-2 pe-6">
+                    <span
+                      className={cx(
+                        'min-w-0 flex-1 truncate text-body-medium',
+                        item.isRead
+                          ? 'text-text-secondary'
+                          : 'font-semibold text-text-primary',
+                      )}
+                    >
+                      {item.direction === 'outbound'
+                        ? `发给 ${item.to[0] ?? '（无收件人）'}`
+                        : item.fromName || item.fromAddress}
+                    </span>
+                    <span className="shrink-0 text-caption-1-regular text-text-tertiary">
+                      {formatTime(item.receivedAt)}
+                    </span>
                   </span>
-                  <span className="shrink-0 text-caption-1-regular text-text-tertiary">
-                    {formatTime(item.receivedAt)}
+                  <span className="flex items-center gap-2">
+                    <span
+                      className={cx(
+                        'min-w-0 flex-1 truncate text-body-regular',
+                        item.isRead
+                          ? 'text-text-secondary'
+                          : 'text-text-primary',
+                      )}
+                    >
+                      {item.subject || '(无主题)'}
+                    </span>
+                    {item.hasAttachments ? (
+                      <RiAttachment2
+                        className="size-3.5 shrink-0 text-foreground-icon-quaternary"
+                        aria-hidden
+                      />
+                    ) : null}
                   </span>
-                </span>
-                <span className="flex items-center gap-2">
-                  <span
-                    className={cx(
-                      'min-w-0 flex-1 truncate text-body-regular',
-                      item.isRead ? 'text-text-secondary' : 'text-text-primary',
-                    )}
-                  >
-                    {item.subject || '(无主题)'}
+                  <span className="line-clamp-1 text-caption-1-regular text-text-tertiary">
+                    {item.snippet || '（无正文摘要）'}
                   </span>
-                  {item.hasAttachments ? (
-                    <RiAttachment2
-                      className="size-3.5 shrink-0 text-foreground-icon-quaternary"
+                </button>
+
+                {/* 星标放在按钮外，避免交互控件嵌套 */}
+                <button
+                  type="button"
+                  aria-label={item.isStarred ? '取消星标' : '加星标'}
+                  aria-pressed={item.isStarred}
+                  disabled={
+                    starMutation.isPending &&
+                    starMutation.variables.id === item.id
+                  }
+                  onClick={() => toggleStar(item.id, item.isStarred)}
+                  className="absolute end-1.5 top-2 grid size-6 place-items-center rounded-md text-foreground-icon-tertiary outline-none transition-colors hover:text-accent-600 focus-visible:ring-2 focus-visible:ring-border-focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {item.isStarred ? (
+                    <RiStarFill
+                      className="size-4 text-accent-600"
                       aria-hidden
                     />
-                  ) : null}
-                </span>
-                <span className="line-clamp-1 text-caption-1-regular text-text-tertiary">
-                  {item.snippet || '（无正文摘要）'}
-                </span>
-              </button>
+                  ) : (
+                    <RiStarLine className="size-4" aria-hidden />
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
 
-              {/* 星标放在按钮外，避免交互控件嵌套 */}
-              <button
-                type="button"
-                aria-label={item.isStarred ? '取消星标' : '加星标'}
-                aria-pressed={item.isStarred}
-                disabled={
-                  starMutation.isPending &&
-                  starMutation.variables.id === item.id
-                }
-                onClick={() => toggleStar(item.id, item.isStarred)}
-                className="absolute end-1.5 top-2 grid size-6 place-items-center rounded-md text-foreground-icon-tertiary outline-none transition-colors hover:text-accent-600 focus-visible:ring-2 focus-visible:ring-border-focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+          {query.hasNextPage ? (
+            <div className="flex justify-center p-4">
+              <Button
+                variant="secondary"
+                size="small"
+                onClick={() => void query.fetchNextPage()}
+                disabled={query.isFetchingNextPage}
               >
-                {item.isStarred ? (
-                  <RiStarFill className="size-4 text-accent-600" aria-hidden />
-                ) : (
-                  <RiStarLine className="size-4" aria-hidden />
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
-
-        {query.hasNextPage ? (
-          <div className="flex justify-center p-4">
-            <Button
-              variant="secondary"
-              size="small"
-              onClick={() => void query.fetchNextPage()}
-              disabled={query.isFetchingNextPage}
-            >
-              加载更早的邮件
-            </Button>
-          </div>
-        ) : null}
+                加载更早的邮件
+              </Button>
+            </div>
+          ) : null}
+        </div>
+        <ScrollFade progress={fade.progress} />
       </div>
     </section>
   )

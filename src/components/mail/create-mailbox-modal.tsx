@@ -64,31 +64,36 @@ export function CreateMailboxModal({
   }, [domainId, domains.data])
 
   async function submit() {
+    if (submitting) return
     if (!prefix.trim()) {
       toast.error('请填写邮箱前缀')
       return
     }
     setSubmitting(true)
-    const result = await createMailboxFn({
-      data: {
-        kind,
-        localPart: prefix.trim(),
-        domainId: selectedDomain?.id,
-      },
-    })
-    setSubmitting(false)
+    try {
+      const result = await createMailboxFn({
+        data: {
+          kind,
+          localPart: prefix.trim(),
+          domainId: selectedDomain?.id,
+        },
+      })
+      if (!result.ok) {
+        toast.error(result.error.message)
+        return
+      }
 
-    if (!result.ok) {
-      toast.error(result.error.message)
-      return
+      toast.success(`已创建 ${result.data.address}`)
+      await navigator.clipboard
+        .writeText(result.data.address)
+        .catch(() => undefined)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes })
+      onOpenChange(false)
+    } catch {
+      toast.error('创建邮箱失败，请检查网络后重试')
+    } finally {
+      setSubmitting(false)
     }
-
-    toast.success(`已创建 ${result.data.address}`)
-    await navigator.clipboard
-      .writeText(result.data.address)
-      .catch(() => undefined)
-    await queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes })
-    onOpenChange(false)
   }
 
   return (
@@ -131,6 +136,8 @@ export function CreateMailboxModal({
                 onChange={setPrefix}
                 className="flex-1"
                 inputDir="ltr"
+                autoCorrect="off"
+                spellCheck="false"
                 hint={
                   selectedDomain
                     ? `完整地址：${prefix || '…'}@${selectedDomain.hostname}`

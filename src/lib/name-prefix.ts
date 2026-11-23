@@ -1,399 +1,10 @@
 /**
- * 临时邮箱随机前缀：常见姓氏 + 名字（拼音，无音调）拼接生日后缀。
- * 形如 liuxiang1998 / zhangboheng1025 / baixiaocun199805，
- * 只包含小写字母与数字，满足地址前缀 [a-z0-9]+ 的约束。
- * 生日按 18–40 岁动态取，Web 弹窗与 Telegram Bot 共用。
+ * 随机邮箱前缀。默认使用不透明的密码学随机标识；只有显式选择
+ * `style: 'personal'` 时才生成旧的「姓名 + 生日」风格。
+ *
+ * 该模块同时用于浏览器、SSR 与 Telegram，因此只依赖 Web Crypto，
+ * 不引入 node:crypto，也不依赖服务端代码。
  */
-
-const SURNAMES = [
-  // 单字姓
-  'ai',
-  'an',
-  'ao',
-  'bai',
-  'bao',
-  'bei',
-  'bi',
-  'bian',
-  'bu',
-  'cai',
-  'cao',
-  'cen',
-  'chai',
-  'chang',
-  'chen',
-  'cheng',
-  'chi',
-  'chu',
-  'cui',
-  'dai',
-  'deng',
-  'di',
-  'ding',
-  'dong',
-  'dou',
-  'du',
-  'duan',
-  'fan',
-  'fang',
-  'fei',
-  'feng',
-  'fu',
-  'gan',
-  'gao',
-  'ge',
-  'geng',
-  'gong',
-  'gu',
-  'guan',
-  'guo',
-  'han',
-  'hao',
-  'he',
-  'hong',
-  'hou',
-  'hu',
-  'hua',
-  'huang',
-  'huo',
-  'ji',
-  'jia',
-  'jiang',
-  'jiao',
-  'jin',
-  'jing',
-  'ju',
-  'kan',
-  'kang',
-  'ke',
-  'kong',
-  'kuang',
-  'lei',
-  'li',
-  'lian',
-  'liang',
-  'liao',
-  'lin',
-  'ling',
-  'liu',
-  'long',
-  'lou',
-  'lu',
-  'lv',
-  'luo',
-  'ma',
-  'mao',
-  'mei',
-  'meng',
-  'mi',
-  'miao',
-  'min',
-  'ming',
-  'mo',
-  'mu',
-  'ni',
-  'nie',
-  'ning',
-  'niu',
-  'ou',
-  'pan',
-  'pang',
-  'pei',
-  'peng',
-  'pi',
-  'qi',
-  'qian',
-  'qiao',
-  'qin',
-  'qiu',
-  'qu',
-  'quan',
-  'ren',
-  'rong',
-  'ruan',
-  'shan',
-  'shao',
-  'shen',
-  'sheng',
-  'shi',
-  'shu',
-  'song',
-  'su',
-  'sun',
-  'tan',
-  'tang',
-  'tao',
-  'tian',
-  'tong',
-  'wan',
-  'wang',
-  'wei',
-  'wen',
-  'wu',
-  'xi',
-  'xia',
-  'xian',
-  'xiang',
-  'xiao',
-  'xie',
-  'xin',
-  'xing',
-  'xiong',
-  'xu',
-  'xue',
-  'yan',
-  'yang',
-  'yao',
-  'ye',
-  'yi',
-  'yin',
-  'ying',
-  'you',
-  'yu',
-  'yuan',
-  'yue',
-  'yun',
-  'zang',
-  'zeng',
-  'zha',
-  'zhai',
-  'zhan',
-  'zhang',
-  'zhao',
-  'zhen',
-  'zheng',
-  'zhi',
-  'zhong',
-  'zhou',
-  'zhu',
-  'zhuang',
-  'zhuo',
-  'zou',
-  'zu',
-  // 复姓
-  'ouyang',
-  'shangguan',
-  'situ',
-  'sima',
-  'zhuge',
-  'dongfang',
-  'huangfu',
-  'yuchi',
-  'gongyang',
-  'xiahou',
-  'murong',
-  'yuwen',
-  'changsun',
-  'duanmu',
-  'ximen',
-  'nangong',
-  'linghu',
-  'zhongli',
-  'xuanyuan',
-  'dugu',
-] as const
-
-const GIVEN_NAMES = [
-  'hao',
-  'haoran',
-  'haoyu',
-  'haoxuan',
-  'haotian',
-  'haoming',
-  'yuxuan',
-  'yutong',
-  'yuxin',
-  'yuhang',
-  'yuchen',
-  'yifan',
-  'yinuo',
-  'yiran',
-  'yize',
-  'yifeng',
-  'yihang',
-  'yijun',
-  'yiming',
-  'yiyang',
-  'yong',
-  'yongqiang',
-  'yongjie',
-  'yongkang',
-  'yonghui',
-  'yue',
-  'yunfei',
-  'yunlong',
-  'yunxi',
-  'ze',
-  'zeyu',
-  'zeyang',
-  'zesheng',
-  'zhiwei',
-  'zhiyuan',
-  'zhiqiang',
-  'zhiming',
-  'zhihao',
-  'zhiyu',
-  'zhiyong',
-  'zhixin',
-  'zijun',
-  'zihan',
-  'zimo',
-  'zixuan',
-  'ziqing',
-  'ziyi',
-  'zining',
-  'zirui',
-  'ziyang',
-  'jing',
-  'jingyi',
-  'jingwen',
-  'jingyu',
-  'jinghao',
-  'jingxuan',
-  'jiaxin',
-  'jiahao',
-  'jiahui',
-  'jiajun',
-  'jiayi',
-  'jian',
-  'jianfeng',
-  'jianguo',
-  'jianjun',
-  'jianming',
-  'jianping',
-  'jun',
-  'junjie',
-  'junhao',
-  'junyi',
-  'junfeng',
-  'ming',
-  'mingze',
-  'mingyu',
-  'minghao',
-  'mingjie',
-  'mingxuan',
-  'xiang',
-  'xiaoming',
-  'xiaocun',
-  'xiaoyu',
-  'xiaofeng',
-  'xiaolong',
-  'xiaowei',
-  'xiaohui',
-  'xiangyu',
-  'xin',
-  'xinyi',
-  'xinyu',
-  'xinran',
-  'xinyan',
-  'xuan',
-  'xuefeng',
-  'xueying',
-  'xue',
-  'fei',
-  'fang',
-  'fangmin',
-  'feng',
-  'fengyu',
-  'fenghua',
-  'bin',
-  'bing',
-  'bo',
-  'boheng',
-  'chen',
-  'chenxi',
-  'cheng',
-  'chenglin',
-  'chao',
-  'chun',
-  'chunyu',
-  'dan',
-  'dong',
-  'dongyu',
-  'enze',
-  'gang',
-  'guang',
-  'guohua',
-  'guoqiang',
-  'han',
-  'hanwen',
-  'hanyu',
-  'hong',
-  'hongyu',
-  'hongwei',
-  'hongtao',
-  'hui',
-  'huimin',
-  'huiying',
-  'jia',
-  'ke',
-  'kun',
-  'lei',
-  'li',
-  'lin',
-  'ling',
-  'lu',
-  'mei',
-  'min',
-  'na',
-  'nan',
-  'ning',
-  'peng',
-  'pengfei',
-  'qi',
-  'qian',
-  'qiang',
-  'qing',
-  'qingyu',
-  'ran',
-  'rui',
-  'ruoxi',
-  'ruiqi',
-  'rong',
-  'shan',
-  'shanshan',
-  'shuai',
-  'shuting',
-  'siyuan',
-  'siqi',
-  'song',
-  'shuang',
-  'tao',
-  'teng',
-  'ting',
-  'wan',
-  'wanqing',
-  'wei',
-  'weimin',
-  'weiwei',
-  'weijie',
-  'wen',
-  'wenbo',
-  'wenjie',
-  'wenjing',
-  'wenxuan',
-  'xi',
-  'xiao',
-  'xiaoxiao',
-  'xiu',
-  'xu',
-  'ya',
-  'yan',
-  'yanan',
-  'yang',
-  'ye',
-  'yi',
-  'ying',
-  'you',
-  'yu',
-  'yuan',
-  'zhen',
-  'zhenyu',
-  'zheng',
-  'zhuo',
-  'zhi',
-  'lihua',
-] as const
 
 const MIN_AGE = 18
 const MAX_AGE = 40
@@ -401,21 +12,73 @@ const DEFAULT_MIN_LENGTH = 8
 const DEFAULT_MAX_LENGTH = 32
 const MAX_PREFIX_LENGTH = 64
 const MAX_ATTEMPTS = 32
-const FALLBACK_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789'
+const OPAQUE_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789'
+const UINT32_RANGE = 0x1_0000_0000
+
+// personal 是显式 opt-in 的兼容风格，不再作为隐私地址的默认格式。
+const PERSONAL_SURNAMES = [
+  'zhang',
+  'wang',
+  'li',
+  'zhao',
+  'chen',
+  'liu',
+  'yang',
+  'huang',
+  'zhou',
+  'wu',
+  'xu',
+  'sun',
+] as const
+
+const PERSONAL_GIVEN_NAMES = [
+  'wei',
+  'fang',
+  'ming',
+  'xin',
+  'yu',
+  'hao',
+  'jun',
+  'jing',
+  'yang',
+  'bo',
+  'lei',
+  'ran',
+] as const
+
+/** 无模偏差的均匀抽样；拒绝超出完整整数区间的尾部值。 */
+function randomIndex(exclusiveMax: number): number {
+  const limit = UINT32_RANGE - (UINT32_RANGE % exclusiveMax)
+  const buffer = new Uint32Array(1)
+  let value: number
+  do {
+    crypto.getRandomValues(buffer)
+    value = buffer[0]
+  } while (value >= limit)
+  return value % exclusiveMax
+}
 
 function pickRandom<T>(list: readonly T[]): T {
-  return list[Math.floor(Math.random() * list.length)]
+  return list[randomIndex(list.length)]
 }
 
 function randomInt(min: number, max: number): number {
-  return min + Math.floor(Math.random() * (max - min + 1))
+  return min + randomIndex(max - min + 1)
+}
+
+function opaqueCandidate(length: number): string {
+  let candidate = ''
+  while (candidate.length < length) {
+    candidate += OPAQUE_CHARS[randomIndex(OPAQUE_CHARS.length)]
+  }
+  return candidate
 }
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0')
 }
 
-/** 在 18–40 岁的合法出生日期窗口内随机取一天 */
+/** 在 18–40 岁的合法出生日期窗口内均匀取一天。 */
 function randomBirthDate(): Date {
   const now = new Date()
   const earliest = new Date(
@@ -428,11 +91,11 @@ function randomBirthDate(): Date {
     now.getMonth(),
     now.getDate(),
   )
-  const span = latest.getTime() - earliest.getTime()
-  return new Date(earliest.getTime() + Math.floor(Math.random() * span))
+  const days = Math.floor((latest.getTime() - earliest.getTime()) / 86_400_000)
+  return new Date(earliest.getTime() + randomInt(0, days) * 86_400_000)
 }
 
-/** 生日后缀：年份（1998）/ 月日（1025）/ 年月（199805） */
+/** 生日后缀：年份（1998）/ 月日（1025）/ 年月（199805）。 */
 function randomBirthdaySuffix(): string {
   const birth = randomBirthDate()
   const month = pad2(birth.getMonth() + 1)
@@ -447,36 +110,58 @@ function randomBirthdaySuffix(): string {
   }
 }
 
+function personalCandidate(): string {
+  return (
+    pickRandom(PERSONAL_SURNAMES) +
+    pickRandom(PERSONAL_GIVEN_NAMES) +
+    randomBirthdaySuffix()
+  )
+}
+
 export interface RandomNamePrefixOptions {
   minLength?: number
   maxLength?: number
+  /** 默认 opaque；personal 仅用于显式请求旧式随机名的场景。 */
+  style?: 'opaque' | 'personal'
 }
 
 export function randomNameLocalPart(
   options: RandomNamePrefixOptions = {},
 ): string {
-  const max = Math.min(
-    Math.max(options.maxLength ?? DEFAULT_MAX_LENGTH, 1),
-    MAX_PREFIX_LENGTH,
-  )
-  const min = Math.min(
-    Math.max(options.minLength ?? DEFAULT_MIN_LENGTH, 1),
-    max,
-  )
+  const min = options.minLength ?? DEFAULT_MIN_LENGTH
+  const max = options.maxLength ?? DEFAULT_MAX_LENGTH
+
+  if (!Number.isInteger(min) || min < 1 || min > MAX_PREFIX_LENGTH) {
+    throw new RangeError(`minLength 必须是 1–${MAX_PREFIX_LENGTH} 的整数`)
+  }
+  if (!Number.isInteger(max) || max < 1 || max > MAX_PREFIX_LENGTH) {
+    throw new RangeError(`maxLength 必须是 1–${MAX_PREFIX_LENGTH} 的整数`)
+  }
+  if (max < DEFAULT_MIN_LENGTH) {
+    throw new RangeError(`随机前缀至少需要 ${DEFAULT_MIN_LENGTH} 位`)
+  }
+
+  // 即使调用方配置了更短的 min，也不能生成低于 8 位的随机地址。
+  const effectiveMin = Math.max(min, DEFAULT_MIN_LENGTH)
+  if (effectiveMin > max) {
+    throw new RangeError('minLength 不能大于 maxLength')
+  }
+
+  if ((options.style ?? 'opaque') === 'opaque') {
+    return opaqueCandidate(randomInt(effectiveMin, max))
+  }
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const candidate =
-      pickRandom(SURNAMES) + pickRandom(GIVEN_NAMES) + randomBirthdaySuffix()
-    if (candidate.length >= min && candidate.length <= max) {
+    const candidate = personalCandidate()
+    if (candidate.length >= effectiveMin && candidate.length <= max) {
       return candidate
     }
   }
 
-  // 站点配置的长度超出姓名组合范围时，用随机字母数字补足
-  let candidate =
-    pickRandom(SURNAMES) + pickRandom(GIVEN_NAMES) + randomBirthdaySuffix()
-  while (candidate.length < min) {
-    candidate += FALLBACK_CHARS[randomInt(0, FALLBACK_CHARS.length - 1)]
+  // 姓名组合无法满足长度窗口时仍保证返回合法长度；所有字符同样来自 CSPRNG。
+  let candidate = personalCandidate()
+  while (candidate.length < effectiveMin) {
+    candidate += OPAQUE_CHARS[randomIndex(OPAQUE_CHARS.length)]
   }
   return candidate.slice(0, max)
 }

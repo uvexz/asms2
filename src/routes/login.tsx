@@ -65,6 +65,7 @@ function LoginPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [passkeyBusy, setPasskeyBusy] = useState(false)
+  const [socialBusy, setSocialBusy] = useState<string | null>(null)
   const pow = usePowHeaders()
 
   const social: LoginSocialMethod[] = auth.social
@@ -85,41 +86,62 @@ function LoginPage() {
   }
 
   async function handleSubmit(data: FormData) {
+    if (loading) return
     const email = String(data.get('email') ?? '')
     const password = String(data.get('password') ?? '')
     setLoading(true)
-    const { data: result, error } = await authClient.signIn.email({
-      email,
-      password,
-      callbackURL: '/mail',
-      fetchOptions: { headers: await pow.getHeaders() },
-    })
-    setLoading(false)
-    if (error) {
-      toast.error(error.message ?? '登录失败，请检查邮箱与密码')
-      return
+    try {
+      const { data: result, error } = await authClient.signIn.email({
+        email,
+        password,
+        callbackURL: '/mail',
+        fetchOptions: { headers: await pow.getHeaders() },
+      })
+      if (error) {
+        toast.error(error.message ?? '登录失败，请检查邮箱与密码')
+        return
+      }
+      await goAfterLogin(Boolean(result.user.emailVerified))
+    } catch {
+      toast.error('登录失败，请检查网络后重试')
+    } finally {
+      setLoading(false)
     }
-    await goAfterLogin(Boolean(result.user.emailVerified))
   }
 
   async function handleProvider(provider: string) {
-    // genericOAuth 复用标准 signIn.social，provider 即各 OIDC 的自定义 providerId
-    await authClient.signIn.social({
-      provider,
-      callbackURL: '/mail',
-    })
+    if (socialBusy) return
+    setSocialBusy(provider)
+    try {
+      // genericOAuth 复用标准 signIn.social，provider 即各 OIDC 的自定义 providerId
+      const { error } = await authClient.signIn.social({
+        provider,
+        callbackURL: '/mail',
+      })
+      if (error) toast.error(error.message ?? '发起登录失败，请稍后重试')
+    } catch {
+      toast.error('发起登录失败，请检查网络后重试')
+    } finally {
+      setSocialBusy(null)
+    }
   }
 
   async function handlePasskey() {
+    if (passkeyBusy) return
     setPasskeyBusy(true)
-    const result = await authClient.signIn.passkey()
-    setPasskeyBusy(false)
-    if (result.error) {
-      toast.error(result.error.message ?? 'Passkey 登录失败')
-      return
+    try {
+      const result = await authClient.signIn.passkey()
+      if (result.error) {
+        toast.error(result.error.message ?? 'Passkey 登录失败')
+        return
+      }
+      // Passkey 是纯客户端登录，必须显式刷新 session 并清缓存
+      await goAfterLogin(Boolean(result.data.user.emailVerified))
+    } catch {
+      toast.error('Passkey 登录失败，请检查网络后重试')
+    } finally {
+      setPasskeyBusy(false)
     }
-    // Passkey 是纯客户端登录，必须显式刷新 session 并清缓存
-    await goAfterLogin(Boolean(result.data.user.emailVerified))
   }
 
   // Conditional UI：浏览器在邮箱输入框上自动提示已保存的通行密钥
@@ -194,9 +216,9 @@ function LoginPage() {
       {loading ? (
         <p className="text-caption-1-regular text-text-tertiary">正在登录…</p>
       ) : null}
-      {passkeyBusy ? (
+      {passkeyBusy || socialBusy ? (
         <p className="text-caption-1-regular text-text-tertiary">
-          正在等待 Passkey 验证…
+          {socialBusy ? '正在跳转登录…' : '正在等待 Passkey 验证…'}
         </p>
       ) : null}
     </div>

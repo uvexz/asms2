@@ -24,7 +24,7 @@ export const Route = createFileRoute('/admin/logs')({
   component: AdminLogs,
 })
 
-const PAGE_SIZE = 100
+const PAGE_SIZE = 50
 
 type Tab = 'audit' | 'webhook' | 'unrouted'
 
@@ -49,7 +49,7 @@ function AdminLogs() {
   const unrouted = useQuery({
     queryKey: queryKeys.admin.unrouted(offset),
     queryFn: async () =>
-      unwrap(await adminListUnroutedFn({ data: { limit: 50, offset } })),
+      unwrap(await adminListUnroutedFn({ data: { limit: PAGE_SIZE, offset } })),
     enabled: tab === 'unrouted',
   })
 

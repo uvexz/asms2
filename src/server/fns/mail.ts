@@ -4,15 +4,22 @@ import { z } from 'zod'
 import { requireVerifiedUser } from '#/server/auth/guards'
 import { attempt } from '#/server/errors'
 import {
+  createMailboxSchema,
+  listMessagesSchema,
+  sendSchema,
+  updateMessageSchema,
+} from '#/server/mail/validation'
+import {
   createMailbox,
   listMailboxes,
   listSelectableDomains,
   removeMailbox,
   updateMailboxProfile,
+  getMailboxOrThrow,
 } from '#/server/mail/mailbox'
 import { getMessage, listMessages, updateMessage } from '#/server/mail/message'
 import { getSendUsage, usageDateFor } from '#/server/mail/quota'
-import { sendMail } from '#/server/mail/send'
+import { sendMail, getOutboundRequestStatus } from '#/server/mail/send'
 import { getSiteSettings } from '#/server/settings'
 
 export const listMailboxesFn = createServerFn({ method: 'GET' }).handler(
@@ -22,13 +29,6 @@ export const listMailboxesFn = createServerFn({ method: 'GET' }).handler(
       return listMailboxes(user.id)
     }),
 )
-
-const createMailboxSchema = z.object({
-  kind: z.enum(['permanent', 'temp']),
-  localPart: z.string().min(1).max(32),
-  domainId: z.string().optional(),
-  displayName: z.string().max(60).optional(),
-})
 
 export const createMailboxFn = createServerFn({ method: 'POST' })
   .validator((data: unknown) => createMailboxSchema.parse(data))
@@ -83,13 +83,6 @@ export const listDomainsFn = createServerFn({ method: 'POST' })
     }),
   )
 
-const listMessagesSchema = z.object({
-  mailboxId: z.string().optional(),
-  folder: z.enum(['inbox', 'sent', 'trash', 'spam', 'archive']),
-  q: z.string().max(100).optional(),
-  cursor: z.string().optional(),
-})
-
 export const listMessagesFn = createServerFn({ method: 'POST' })
   .validator((data: unknown) => listMessagesSchema.parse(data))
   .handler(async ({ data }) =>
@@ -108,13 +101,6 @@ export const getMessageFn = createServerFn({ method: 'POST' })
     }),
   )
 
-const updateMessageSchema = z.object({
-  id: z.string(),
-  isRead: z.boolean().optional(),
-  isStarred: z.boolean().optional(),
-  folder: z.enum(['inbox', 'sent', 'trash', 'spam', 'archive']).optional(),
-})
-
 export const updateMessageFn = createServerFn({ method: 'POST' })
   .validator((data: unknown) => updateMessageSchema.parse(data))
   .handler(async ({ data }) =>
@@ -129,39 +115,33 @@ export const updateMessageFn = createServerFn({ method: 'POST' })
     }),
   )
 
-// 收件人总数在 sendMail 里按 to + cc + bcc 合并校验；这里只挡住超大载荷
-const recipientField = z.union([
-  z.string().max(4_000),
-  z.array(z.string().max(320)).max(20),
-])
-
-const sendSchema = z.object({
-  fromMailboxId: z.string(),
-  to: recipientField,
-  cc: recipientField.optional(),
-  bcc: recipientField.optional(),
-  subject: z.string().max(200).optional(),
-  text: z.string().max(100_000).optional(),
-  html: z.string().max(200_000).optional(),
-  attachments: z
-    .array(
-      z.object({
-        filename: z.string().min(1).max(200),
-        // 10MB 附件的 base64 约 13.4M 字符，留一点余量
-        content: z.string().max(14_000_000),
-        contentType: z.string().max(100).optional(),
-      }),
-    )
-    .max(3)
-    .optional(),
-})
-
 export const sendMailFn = createServerFn({ method: 'POST' })
   .validator((data: unknown) => sendSchema.parse(data))
   .handler(async ({ data }) =>
     attempt(async () => {
       const user = await requireVerifiedUser()
       return sendMail(user, data)
+    }),
+  )
+
+export const getSendStatusFn = createServerFn({ method: 'GET' })
+  .validator((data: unknown) =>
+    z
+      .object({
+        fromMailboxId: z.string(),
+        idempotencyKey: z.string().min(8).max(200),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }) =>
+    attempt(async () => {
+      const user = await requireVerifiedUser()
+      await getMailboxOrThrow(user.id, data.fromMailboxId)
+      return getOutboundRequestStatus(
+        user.id,
+        data.idempotencyKey,
+        data.fromMailboxId,
+      )
     }),
   )
 

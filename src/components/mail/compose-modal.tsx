@@ -53,6 +53,8 @@ export function ComposeModal({
   const [subject, setSubject] = useState('')
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
+  // 每次打开写信是一个新请求；网络中断/结果未知时保留此键重试。
+  const [draftKey, setDraftKey] = useState(() => crypto.randomUUID())
 
   useEffect(() => {
     if (!isOpen) return
@@ -62,10 +64,12 @@ export function ComposeModal({
     setText('')
     setCc('')
     setShowCc(false)
+    setDraftKey(crypto.randomUUID())
     // 只在打开时初始化，避免后台刷新把正在编辑的内容重置
   }, [isOpen, defaultFromId, defaultTo, defaultSubject])
 
   async function submit() {
+    if (sending) return
     if (!fromId) {
       toast.error('请选择发件邮箱')
       return
@@ -80,33 +84,42 @@ export function ComposeModal({
     }
 
     setSending(true)
-    const result = await sendMailFn({
-      data: {
-        fromMailboxId: fromId,
-        to: to
-          .split(/[,;\s]+/)
-          .map((item) => item.trim())
-          .filter(Boolean),
-        cc: cc
-          .split(/[,;\s]+/)
-          .map((item) => item.trim())
-          .filter(Boolean),
-        subject: subject.trim() || undefined,
-        text,
-      },
-    })
-    setSending(false)
+    try {
+      const result = await sendMailFn({
+        data: {
+          fromMailboxId: fromId,
+          to: to
+            .split(/[,;\s]+/)
+            .map((item) => item.trim())
+            .filter(Boolean),
+          cc: cc
+            .split(/[,;\s]+/)
+            .map((item) => item.trim())
+            .filter(Boolean),
+          subject: subject.trim() || undefined,
+          text,
+          idempotencyKey: draftKey,
+        },
+      })
+      if (!result.ok) {
+        toast.error(result.error.message)
+        // 结果未知时保留原幂等键；明确失败后才换新键，避免重复邮件。
+        if (result.error.code !== 'send_uncertain') {
+          setDraftKey(crypto.randomUUID())
+        }
+        return
+      }
 
-    if (!result.ok) {
-      toast.error(result.error.message)
-      return
+      toast.success('邮件已发送')
+      // 只刷新列表首页与配额；不再把无限列表的全部分页重取一遍
+      void queryClient.invalidateQueries({ queryKey: queryKeys.quota })
+      requestMailRefresh()
+      onOpenChange(false)
+    } catch {
+      toast.error('发送邮件失败，请检查网络后重试')
+    } finally {
+      setSending(false)
     }
-
-    toast.success('邮件已发送')
-    // 只刷新列表首页与配额；不再把无限列表的全部分页重取一遍
-    void queryClient.invalidateQueries({ queryKey: queryKeys.quota })
-    requestMailRefresh()
-    onOpenChange(false)
   }
 
   return (
@@ -154,6 +167,8 @@ export function ComposeModal({
               value={to}
               onChange={setTo}
               inputDir="ltr"
+              autoCorrect="off"
+              spellCheck="false"
               isRequired
             />
 
@@ -164,6 +179,8 @@ export function ComposeModal({
                 value={cc}
                 onChange={setCc}
                 inputDir="ltr"
+                autoCorrect="off"
+                spellCheck="false"
               />
             ) : (
               <button

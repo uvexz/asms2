@@ -89,7 +89,9 @@ export function usePowHeaders(prefetch = true) {
     else if (outcome) setStatus(statusOf(outcome))
     else setStatus('error')
 
-    return outcome && 'header' in outcome ? { [POW_HEADER]: outcome.header } : {}
+    return outcome && 'header' in outcome
+      ? { [POW_HEADER]: outcome.header }
+      : {}
   }, [prefetch, prepare])
 
   return { getHeaders, status, retry: prepare }

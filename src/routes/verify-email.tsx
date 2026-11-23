@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
+import {
+  createFileRoute,
+  redirect,
+  useNavigate,
+  useRouter,
+} from '@tanstack/react-router'
 import {
   RiLogoutBoxLine,
   RiMailCheckLine,
@@ -10,6 +16,7 @@ import { Button } from '#/components/base/buttons/button'
 import { toast } from '#/components/base/toast/toast'
 import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
+import { performSignOut } from '#/lib/sign-out'
 import { usePowHeaders } from '#/lib/pow-client'
 import { PowStatusLine } from '#/components/application/auth/pow-status'
 
@@ -33,6 +40,8 @@ export const Route = createFileRoute('/verify-email')({
 
 function VerifyEmailPage() {
   const navigate = useNavigate()
+  const router = useRouter()
+  const queryClient = useQueryClient()
   const { session } = Route.useRouteContext()
   const { verified } = Route.useSearch()
   const [sending, setSending] = useState(false)
@@ -60,23 +69,27 @@ function VerifyEmailPage() {
 
   async function resend() {
     setSending(true)
-    const { error } = await authClient.sendVerificationEmail({
-      email: session?.email ?? '',
-      callbackURL: '/verify-email?verified=1',
-      fetchOptions: { headers: await pow.getHeaders() },
-    })
-    setSending(false)
-    if (error) {
-      toast.error(error.message ?? '发送失败，请稍后再试')
-      return
+    try {
+      const { error } = await authClient.sendVerificationEmail({
+        email: session?.email ?? '',
+        callbackURL: '/verify-email?verified=1',
+        fetchOptions: { headers: await pow.getHeaders() },
+      })
+      if (error) {
+        toast.error(error.message ?? '发送失败，请稍后再试')
+        return
+      }
+      toast.success('验证邮件已发送，请检查收件箱')
+      setCooldown(60)
+    } catch {
+      toast.error('发送失败，请检查网络后重试')
+    } finally {
+      setSending(false)
     }
-    toast.success('验证邮件已发送，请检查收件箱')
-    setCooldown(60)
   }
 
   async function signOut() {
-    await authClient.signOut()
-    await navigate({ to: '/login' })
+    await performSignOut({ queryClient, router, navigate })
   }
 
   return (

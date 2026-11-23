@@ -122,45 +122,63 @@ function SettingsPage() {
   })
 
   async function saveProfile() {
+    if (saving) return
     setSaving(true)
-    const { error } = await authClient.updateUser({ name })
-    setSaving(false)
-    if (error) {
-      toast.error(error.message ?? '保存失败')
-      return
+    try {
+      const { error } = await authClient.updateUser({ name })
+      if (error) {
+        toast.error(error.message ?? '保存失败')
+        return
+      }
+      toast.success('资料已更新')
+    } catch {
+      toast.error('保存失败，请检查网络后重试')
+    } finally {
+      setSaving(false)
     }
-    toast.success('资料已更新')
   }
 
   async function createKey() {
+    if (keyLoading) return
     setKeyLoading(true)
-    const label = keyName.trim() || 'default'
-    // 限流参数是 server-only 字段，由服务端插件统一配置（120 次/分钟）
-    const result = await apiKeyClient().create({ name: label })
-    setKeyLoading(false)
-    if (result.error || !result.data?.key) {
-      toast.error(result.error?.message ?? '创建失败')
-      return
+    try {
+      const label = keyName.trim() || 'default'
+      // 限流参数是 server-only 字段，由服务端插件统一配置（120 次/分钟）
+      const result = await apiKeyClient().create({ name: label })
+      if (result.error || !result.data?.key) {
+        toast.error(result.error?.message ?? '创建失败')
+        return
+      }
+      setNewKey(result.data.key)
+      setKeyName('')
+      // 立即把新 Key 追加到列表，而不是等下一次整页刷新
+      queryClient.setQueryData<ApiKeyRow[]>(queryKeys.apiKeys, (old) => [
+        {
+          id: result.data?.id ?? result.data!.key!,
+          name: label,
+          start: result.data!.key!.slice(0, 6),
+          createdAt: new Date(),
+          enabled: true,
+        },
+        ...(old ?? []),
+      ])
+      toast.success('API Key 已创建，请立即保存')
+    } catch {
+      toast.error('创建失败，请检查网络后重试')
+    } finally {
+      setKeyLoading(false)
     }
-    setNewKey(result.data.key)
-    setKeyName('')
-    // 立即把新 Key 追加到列表，而不是等下一次整页刷新
-    queryClient.setQueryData<ApiKeyRow[]>(queryKeys.apiKeys, (old) => [
-      {
-        id: result.data?.id ?? result.data!.key!,
-        name: label,
-        start: result.data!.key!.slice(0, 6),
-        createdAt: new Date(),
-        enabled: true,
-      },
-      ...(old ?? []),
-    ])
-    toast.success('API Key 已创建，请立即保存')
   }
 
   async function revokeKey() {
     if (!revoking) return
-    const result = await apiKeyClient().delete({ keyId: revoking.id })
+    let result: Awaited<ReturnType<ReturnType<typeof apiKeyClient>['delete']>>
+    try {
+      result = await apiKeyClient().delete({ keyId: revoking.id })
+    } catch {
+      toast.error('删除失败，请检查网络后重试')
+      throw new Error('API key deletion request failed')
+    }
     if (result.error) {
       toast.error(result.error.message ?? '删除失败')
       throw new Error(result.error.message ?? '删除失败')
@@ -268,6 +286,8 @@ function SettingsPage() {
             onChange={setKeyName}
             className="max-w-xs"
             inputDir="ltr"
+            autoCorrect="off"
+            spellCheck="false"
           />
           <Button
             leadingIcon={RiKey2Line}
@@ -385,14 +405,20 @@ function TelegramSection() {
   const data = status.data
 
   async function generateCode() {
+    if (generating) return
     setGenerating(true)
-    const result = await createTelegramBindCodeFn()
-    setGenerating(false)
-    if (!result.ok) {
-      toast.error(result.error.message)
-      return
+    try {
+      const result = await createTelegramBindCodeFn()
+      if (!result.ok) {
+        toast.error(result.error.message)
+        return
+      }
+      setCode(result.data)
+    } catch {
+      toast.error('生成绑定码失败，请检查网络后重试')
+    } finally {
+      setGenerating(false)
     }
-    setCode(result.data)
   }
 
   async function toggleNotify(link: TelegramLinkView, enabled: boolean) {
@@ -645,10 +671,15 @@ function SecuritySection() {
 
   async function loadPasskeys() {
     setLoading(true)
-    const result = await authClient.passkey.listUserPasskeys()
-    setLoading(false)
-    if (result.error) return
-    setPasskeys(result.data)
+    try {
+      const result = await authClient.passkey.listUserPasskeys()
+      if (result.error) return
+      setPasskeys(result.data)
+    } catch {
+      toast.error('读取 Passkey 失败，请检查网络后重试')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -656,22 +687,34 @@ function SecuritySection() {
   }, [passkeyEnabled])
 
   async function addPasskey() {
+    if (adding) return
     setAdding(true)
-    const result = await authClient.passkey.addPasskey({
-      name: name.trim() || undefined,
-    })
-    setAdding(false)
-    if (result.error) {
-      toast.error(result.error.message ?? '绑定 Passkey 失败')
-      return
+    try {
+      const result = await authClient.passkey.addPasskey({
+        name: name.trim() || undefined,
+      })
+      if (result.error) {
+        toast.error(result.error.message ?? '绑定 Passkey 失败')
+        return
+      }
+      toast.success('Passkey 已绑定')
+      setName('')
+      await loadPasskeys()
+    } catch {
+      toast.error('绑定 Passkey 失败，请检查网络或浏览器权限后重试')
+    } finally {
+      setAdding(false)
     }
-    toast.success('Passkey 已绑定')
-    setName('')
-    await loadPasskeys()
   }
 
   async function removePasskey(row: PasskeyRow) {
-    const result = await authClient.passkey.deletePasskey({ id: row.id })
+    let result: Awaited<ReturnType<typeof authClient.passkey.deletePasskey>>
+    try {
+      result = await authClient.passkey.deletePasskey({ id: row.id })
+    } catch {
+      toast.error('删除 Passkey 失败，请检查网络后重试')
+      throw new Error('Passkey deletion request failed')
+    }
     if (result.error) {
       toast.error(result.error.message ?? '删除失败')
       throw new Error(result.error.message ?? '删除失败')
@@ -682,18 +725,24 @@ function SecuritySection() {
   }
 
   async function resendVerification() {
+    if (sending) return
     setSending(true)
-    const { error } = await authClient.sendVerificationEmail({
-      email: session?.email ?? '',
-      callbackURL: '/verify-email?verified=1',
-      fetchOptions: { headers: await pow.getHeaders() },
-    })
-    setSending(false)
-    if (error) {
-      toast.error(error.message ?? '发送失败，请稍后再试')
-      return
+    try {
+      const { error } = await authClient.sendVerificationEmail({
+        email: session?.email ?? '',
+        callbackURL: '/verify-email?verified=1',
+        fetchOptions: { headers: await pow.getHeaders() },
+      })
+      if (error) {
+        toast.error(error.message ?? '发送失败，请稍后再试')
+        return
+      }
+      toast.success('验证邮件已发送')
+    } catch {
+      toast.error('发送失败，请检查网络后重试')
+    } finally {
+      setSending(false)
     }
-    toast.success('验证邮件已发送')
   }
 
   return (
@@ -751,6 +800,8 @@ function SecuritySection() {
               value={name}
               onChange={setName}
               className="max-w-xs"
+              autoCorrect="off"
+              spellCheck="false"
             />
             <Button
               leadingIcon={RiFingerprintLine}
@@ -896,15 +947,21 @@ function SsoSection() {
   }, [search.linked, search.error, navigate, queryClient])
 
   async function bind(providerId: string) {
+    if (busy) return
     setBusy(providerId)
-    const { error } = await authClient.linkSocial({
-      provider: providerId,
-      callbackURL: `/settings?linked=${encodeURIComponent(providerId)}`,
-      errorCallbackURL: '/settings',
-    })
-    // 成功时浏览器已经跳去目标平台，这里只处理没能发起授权的情况
-    setBusy(null)
-    if (error) toast.error(error.message ?? '发起绑定失败，请稍后重试')
+    try {
+      const { error } = await authClient.linkSocial({
+        provider: providerId,
+        callbackURL: `/settings?linked=${encodeURIComponent(providerId)}`,
+        errorCallbackURL: '/settings',
+      })
+      // 成功时浏览器已经跳去目标平台，这里只处理没能发起授权的情况
+      if (error) toast.error(error.message ?? '发起绑定失败，请稍后重试')
+    } catch {
+      toast.error('发起绑定失败，请检查网络后重试')
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function unlink(row: SsoAccount) {

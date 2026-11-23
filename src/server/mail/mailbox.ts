@@ -8,6 +8,14 @@ import { getSiteSettings } from '#/server/settings'
 import { MAILBOX_LIST_LIMIT } from '#/lib/limits'
 
 import { validateLocalPart } from './address'
+import {
+  isAddressConflict,
+  quotaHourBucket,
+  releaseMailboxQuota,
+  reserveMailboxQuotaOrThrow,
+  softDeleteMailbox,
+  TEMP_MAILBOXES_PER_HOUR,
+} from './mailbox-quota'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
 
@@ -213,47 +221,11 @@ export async function createMailbox(
   const targetDomain = await resolveDomain(input.kind, input.domainId)
 
   const now = Date.now()
-
-  if (input.kind === 'permanent') {
-    const limit = input.mailboxLimit ?? settings.defaultMailboxLimit
-    const countRows = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(mailbox)
-      .where(
-        and(
-          eq(mailbox.userId, userId),
-          eq(mailbox.kind, 'permanent'),
-          ne(mailbox.status, 'deleted'),
-        ),
-      )
-    const count = Number(countRows[0]?.count ?? 0)
-    if (count >= limit) {
-      throw new AppError(
-        'mailbox_limit_reached',
-        `长期邮箱已达上限（${limit} 个），请先删除不再使用的邮箱`,
-        409,
-      )
-    }
-  } else {
-    const recent = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(mailbox)
-      .where(
-        and(
-          eq(mailbox.userId, userId),
-          eq(mailbox.kind, 'temp'),
-          gt(mailbox.createdAt, new Date(now - 60 * 60 * 1000)),
-        ),
-      )
-    if (Number(recent[0]?.count ?? 0) >= 20) {
-      throw new AppError(
-        'rate_limited',
-        '临时邮箱创建过于频繁，请稍后再试',
-        429,
-      )
-    }
-  }
-
+  const mailboxId = idPart()
+  const limit =
+    input.kind === 'permanent'
+      ? (input.mailboxLimit ?? settings.defaultMailboxLimit)
+      : TEMP_MAILBOXES_PER_HOUR
   // 冷却期检查：地址被删除/失效后一段时间内不允许被任何人重新注册
   const cooldownMs =
     (input.kind === 'temp'
@@ -283,11 +255,19 @@ export async function createMailbox(
       ? new Date(now + settings.tempTtlMinutes * 60 * 1000)
       : null
 
+  await reserveMailboxQuotaOrThrow({
+    userId,
+    kind: input.kind,
+    mailboxId,
+    limit,
+    hourBucket: quotaHourBucket(now),
+  })
+
   try {
     const inserted = await db
       .insert(mailbox)
       .values({
-        id: idPart(),
+        id: mailboxId,
         userId,
         domainId: targetDomain.id,
         localPart,
@@ -304,7 +284,9 @@ export async function createMailbox(
     const row = inserted[0]
     return toView({ ...row, domain: targetDomain.hostname, unread: 0 })
   } catch (error) {
-    if (error instanceof Error && /unique|constraint/i.test(error.message)) {
+    // 地址冲突/写入失败时释放预占，避免占用名额直到下一次 sweep。
+    await releaseMailboxQuota(mailboxId).catch(() => undefined)
+    if (isAddressConflict(error)) {
       throw new AppError('address_taken', '该地址已被占用', 409)
     }
     throw error
@@ -315,19 +297,7 @@ export async function removeMailbox(userId: string, mailboxId: string) {
   const row = await getMailboxOrThrow(userId, mailboxId, {
     allowExpired: true,
   })
-  const now = new Date()
-
-  // 软删 + 墓碑化地址（保留原 localPart 供冷却期判断，同时释放唯一索引）
-  await db
-    .update(mailbox)
-    .set({
-      status: 'deleted',
-      address: `${row.address}#${row.id}`,
-      expiresAt: null,
-      deletedAt: now,
-      updatedAt: now,
-    })
-    .where(eq(mailbox.id, row.id))
+  await softDeleteMailbox({ id: row.id, address: row.address })
 
   return { id: row.id }
 }

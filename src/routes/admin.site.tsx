@@ -82,11 +82,6 @@ const BOOLEAN_FIELDS: {
   },
   { key: 'allowTempSend', label: '允许临时邮箱发信', hint: '默认只收不发' },
   { key: 'allowUserDomainChoice', label: '允许用户选择域名' },
-  {
-    key: 'adminCanReadMail',
-    label: '允许管理员查看邮件正文',
-    hint: '每次查看都会写审计日志',
-  },
 ]
 
 function AdminSite() {
@@ -161,7 +156,6 @@ function AdminSite() {
           permanentCooldownDays: form.permanentCooldownDays,
           allowTempSend: form.allowTempSend,
           allowUserDomainChoice: form.allowUserDomainChoice,
-          adminCanReadMail: form.adminCanReadMail,
           trashRetentionDays: form.trashRetentionDays,
           orphanRetentionDays: form.orphanRetentionDays,
           deletedMailboxRetentionDays: form.deletedMailboxRetentionDays,

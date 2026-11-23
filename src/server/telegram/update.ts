@@ -1,3 +1,5 @@
+import { and, eq, lt, or, sql } from 'drizzle-orm'
+
 import { db } from '#/db/client'
 import { telegramUpdate } from '#/db/schema'
 import { AppError } from '#/server/errors'
@@ -10,7 +12,10 @@ import {
   removeMailbox,
 } from '#/server/mail/mailbox'
 import { getMessage, listMessages, markRead } from '#/server/mail/message'
-import { getSiteSettings, isEmailVerificationSatisfied } from '#/server/settings'
+import {
+  getSiteSettings,
+  isEmailVerificationSatisfied,
+} from '#/server/settings'
 import {
   answerCallbackQuery,
   editMessageText,
@@ -44,6 +49,9 @@ import {
 import type { TelegramLinkWithUser } from './link'
 
 const MAX_LISTED_MAILBOXES = 8
+const STALE_PROCESSING_MS = 60_000
+const MAX_UPDATE_ATTEMPTS = 8
+const UPDATE_ERROR_MAX_LENGTH = 500
 
 /** 不需要账号可用即可执行的命令：查看帮助、查看 chat_id、解绑 */
 const ALWAYS_ALLOWED_COMMANDS = new Set(['help', 'id', 'unbind'])
@@ -64,8 +72,9 @@ async function blockedReason(
 }
 
 /**
- * Webhook 入口：去重 → 分发。
- * Telegram 在超时后会重推同一 update_id，先落库抢占，抢不到就当重复请求丢掉。
+ * Webhook 入口：原子抢占 → 分发 → 标记完成。
+ * 已处理及未超时的处理中记录按重复请求跳过；失败或卡死记录允许重试。
+ * 处理异常必须抛出，让 webhook 返回 5xx，而不是由 Telegram 误判为已消费。
  */
 export async function handleTelegramUpdate(update: TgUpdate): Promise<void> {
   const runtime = await getTelegramRuntime()
@@ -75,6 +84,8 @@ export async function handleTelegramUpdate(update: TgUpdate): Promise<void> {
   const chatId = String(
     message?.chat.id ?? update.callback_query?.message?.chat.id ?? '',
   )
+  const now = new Date()
+  const stale = new Date(now.getTime() - STALE_PROCESSING_MS)
 
   const claimed = await db
     .insert(telegramUpdate)
@@ -82,11 +93,32 @@ export async function handleTelegramUpdate(update: TgUpdate): Promise<void> {
       updateId: update.update_id,
       chatId: chatId || null,
       kind: update.callback_query ? 'callback' : 'message',
-      createdAt: new Date(),
+      status: 'processing',
+      attempts: 1,
+      updatedAt: now,
+      createdAt: now,
     })
-    .onConflictDoNothing()
+    .onConflictDoUpdate({
+      target: telegramUpdate.updateId,
+      set: {
+        status: 'processing',
+        updatedAt: now,
+        attempts: sql`${telegramUpdate.attempts} + 1`,
+      },
+      where: and(
+        lt(telegramUpdate.attempts, MAX_UPDATE_ATTEMPTS),
+        or(
+          eq(telegramUpdate.status, 'failed'),
+          and(
+            eq(telegramUpdate.status, 'processing'),
+            lt(telegramUpdate.updatedAt, stale),
+          ),
+        ),
+      ),
+    })
     .returning({ updateId: telegramUpdate.updateId })
 
+  // 迁移前的记录默认 processed，因此也会在这里去重；达到重试上限同样跳过。
   if (claimed.length === 0) return
 
   try {
@@ -96,17 +128,29 @@ export async function handleTelegramUpdate(update: TgUpdate): Promise<void> {
       // 编辑消息、贴纸、图片等一律不处理，避免噪音
       await handleMessage(runtime, update.message)
     }
+
+    // 即使 update 类型被忽略，也视为成功消费，不能无限重推。
+    // 若副作用已完成而这里写库失败，重试会重新执行副作用；当前不保证端到端幂等。
+    await db
+      .update(telegramUpdate)
+      .set({ status: 'processed', updatedAt: new Date(), lastError: null })
+      .where(eq(telegramUpdate.updateId, update.update_id))
   } catch (error) {
     const reason = error instanceof Error ? error.message : '处理失败'
     console.error('[telegram] update failed:', reason)
+
+    // 状态落库失败也必须抛出原始异常，不能吞掉后让 webhook 返回 200。
+    await db
+      .update(telegramUpdate)
+      .set({
+        status: 'failed',
+        updatedAt: new Date(),
+        lastError: reason.slice(0, UPDATE_ERROR_MAX_LENGTH),
+      })
+      .where(eq(telegramUpdate.updateId, update.update_id))
     await recordTelegramError(reason)
-    if (chatId) {
-      // 内部错误原文只进日志与后台，不回显给 Telegram 用户
-      await sendMessage(runtime.token, {
-        chatId,
-        text: '处理失败，请稍后重试。',
-      }).catch(() => undefined)
-    }
+
+    throw error
   }
 }
 
@@ -403,7 +447,16 @@ async function handleCallback(
   const data = query.data ?? ''
 
   if (!chatId) {
-    await answerCallbackQuery(runtime.token, query.id).catch(() => undefined)
+    await answerCallbackQuery(runtime.token, query.id)
+    return
+  }
+
+  if (query.message?.chat.type !== 'private') {
+    await answerCallbackQuery(
+      runtime.token,
+      query.id,
+      '请在私聊中使用本机器人，群组里不处理邮件内容。',
+    )
     return
   }
 
@@ -414,26 +467,20 @@ async function handleCallback(
   if (action === 'r') {
     const link = await getLinkByChat(chatId)
     if (!link) {
-      await answerCallbackQuery(runtime.token, query.id, '请先绑定账号').catch(
-        () => undefined,
-      )
+      await answerCallbackQuery(runtime.token, query.id, '请先绑定账号')
       return
     }
     const blockedRead = await blockedReason(link)
     if (blockedRead) {
-      await answerCallbackQuery(runtime.token, query.id, blockedRead).catch(
-        () => undefined,
-      )
+      await answerCallbackQuery(runtime.token, query.id, blockedRead)
       return
     }
     await markRead(link.userId, arg, true)
-    await answerCallbackQuery(runtime.token, query.id, '已标记已读').catch(
-      () => undefined,
-    )
+    await answerCallbackQuery(runtime.token, query.id, '已标记已读')
     return
   }
 
-  await answerCallbackQuery(runtime.token, query.id).catch(() => undefined)
+  await answerCallbackQuery(runtime.token, query.id)
 
   const link = await getLinkByChat(chatId)
   if (!link) {
@@ -561,7 +608,7 @@ async function showMessage(
   targetMessageId: string,
 ) {
   const detail = await getMessage(userId, targetMessageId)
-  await markRead(userId, targetMessageId, true).catch(() => undefined)
+  await markRead(userId, targetMessageId, true)
 
   const settings = await getSiteSettings()
   const body =
@@ -688,7 +735,10 @@ async function reply(
   await sendMessage(runtime.token, { chatId, text, keyboard })
 }
 
-/** 优先原地编辑，失败（消息太旧 / 未变化）则退回新消息 */
+/**
+ * 原地编辑具有幂等性：成功后的状态写入若失败，重试编辑相同内容可安全收敛。
+ * 其它编辑错误必须抛出，不能再用新消息掩盖失败；回复文本本身仍可能在重试时重复。
+ */
 async function replaceMessage(
   runtime: TelegramRuntime,
   chatId: string,
@@ -712,7 +762,10 @@ async function replaceMessage(
       ) {
         return
       }
+      throw error
     }
   }
+
+  // 回调没有可编辑的原消息时，只能发送新消息；重试可能产生重复提示。
   await sendMessage(runtime.token, { chatId, text, keyboard })
 }

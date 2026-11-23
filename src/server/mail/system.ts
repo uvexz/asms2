@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { and, asc, desc, eq } from 'drizzle-orm'
 
 import { db } from '#/db/client'
@@ -96,7 +98,7 @@ export async function sendSystemMail(input: SystemMailInput): Promise<void> {
         subject: input.subject,
         text: input.text,
         html: input.html ?? textToHtml(input.text),
-        idempotencyKey: `system/${Date.now()}/${Math.random().toString(36).slice(2, 10)}`,
+        idempotencyKey: `system/${randomUUID()}`,
       },
       sender.runtime,
     )

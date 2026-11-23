@@ -60,6 +60,7 @@ export const siteSettings = sqliteTable('site_settings', {
   })
     .notNull()
     .default(true),
+  /** @deprecated 从未实现管理员读信；保留列避免 SQLite 破坏性迁移。 */
   adminCanReadMail: integer('admin_can_read_mail', { mode: 'boolean' })
     .notNull()
     .default(false),

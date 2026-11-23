@@ -126,7 +126,6 @@ const settingsPatchSchema = z.object({
   permanentCooldownDays: z.number().int().min(0).max(365).optional(),
   allowTempSend: z.boolean().optional(),
   allowUserDomainChoice: z.boolean().optional(),
-  adminCanReadMail: z.boolean().optional(),
   trashRetentionDays: z.number().int().min(1).max(365).optional(),
   orphanRetentionDays: z.number().int().min(1).max(365).optional(),
   deletedMailboxRetentionDays: z.number().int().min(0).max(3650).optional(),
@@ -638,7 +637,13 @@ export const adminDeleteProviderFn = createServerFn({ method: 'POST' })
       if (Number(used[0]?.count ?? 0) > 0) {
         throw new AppError('conflict', '仍有域名绑定该服务商，不能删除', 409)
       }
-      await db.delete(providerConfig).where(eq(providerConfig.id, data.id))
+      // 不依赖外键级联：libSQL 连接池/远程库不保证 foreign_keys 开启。
+      await db.batch([
+        db
+          .delete(webhookEndpoint)
+          .where(eq(webhookEndpoint.providerConfigId, data.id)),
+        db.delete(providerConfig).where(eq(providerConfig.id, data.id)),
+      ])
       await audit(actor.id, 'provider.delete', 'provider', data.id)
       return { id: data.id }
     }),

@@ -2,43 +2,46 @@ import { createFileRoute } from '@tanstack/react-router'
 
 import { authenticateApiKey } from '#/server/auth/api-key'
 import { AppError } from '#/server/errors'
-import { sendMail } from '#/server/mail/send'
-
-function fail(error: unknown) {
-  if (error instanceof AppError) {
-    return Response.json(
-      { ok: false, error: { code: error.code, message: error.message } },
-      { status: error.status },
-    )
-  }
-  console.error('[api/v1/send]', error)
-  return Response.json(
-    { ok: false, error: { code: 'internal', message: '发送失败' } },
-    { status: 500 },
-  )
-}
+import { sendMail, getOutboundRequestStatus } from '#/server/mail/send'
+import {
+  apiErrorResponse,
+  apiSendSchema,
+  parseJsonBody,
+} from '#/server/mail/validation'
 
 export const Route = createFileRoute('/api/v1/send')({
   server: {
     handlers: {
+      GET: async ({ request }) => {
+        try {
+          const { user, mailboxId } = await authenticateApiKey(request)
+          const url = new URL(request.url)
+          const idempotencyKey = url.searchParams.get('idempotencyKey')?.trim()
+          const fromMailboxId =
+            mailboxId ?? url.searchParams.get('fromMailboxId')?.trim()
+          if (!idempotencyKey || !fromMailboxId) {
+            throw new AppError(
+              'validation_failed',
+              '查询发送状态需要 idempotencyKey 与 fromMailboxId',
+            )
+          }
+          return Response.json({
+            ok: true,
+            data: await getOutboundRequestStatus(
+              user.id,
+              idempotencyKey,
+              fromMailboxId,
+            ),
+          })
+        } catch (error) {
+          return apiErrorResponse(error)
+        }
+      },
       POST: async ({ request }) => {
         try {
           const { user, mailboxId } = await authenticateApiKey(request)
-          const body = (await request.json()) as {
-            fromMailboxId?: string
-            from?: string
-            to: string | string[]
-            cc?: string | string[]
-            bcc?: string | string[]
-            subject?: string
-            text?: string
-            html?: string
-            attachments?: {
-              filename: string
-              content: string
-              contentType?: string
-            }[]
-          }
+          // 3 个 10MB 附件经 base64 编码后约 40MB，再加正文与 JSON 结构。
+          const body = await parseJsonBody(request, apiSendSchema, 45_000_000)
 
           const fromMailboxId = mailboxId ?? body.fromMailboxId
           if (!fromMailboxId) {
@@ -57,11 +60,12 @@ export const Route = createFileRoute('/api/v1/send')({
             text: body.text,
             html: body.html,
             attachments: body.attachments,
+            idempotencyKey: body.idempotencyKey,
           })
 
           return Response.json({ ok: true, data: result })
         } catch (error) {
-          return fail(error)
+          return apiErrorResponse(error)
         }
       },
     },

@@ -9,6 +9,7 @@ export type ErrorCode =
   | 'quota_exceeded'
   | 'rate_limited'
   | 'provider_error'
+  | 'send_uncertain'
   | 'not_implemented'
   | 'internal'
 

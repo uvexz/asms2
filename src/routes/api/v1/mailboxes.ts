@@ -3,19 +3,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { authenticateApiKey } from '#/server/auth/api-key'
 import { AppError } from '#/server/errors'
 import { createMailbox, listMailboxes } from '#/server/mail/mailbox'
-
-function fail(error: unknown) {
-  if (error instanceof AppError) {
-    return Response.json(
-      { ok: false, error: { code: error.code, message: error.message } },
-      { status: error.status },
-    )
-  }
-  return Response.json(
-    { ok: false, error: { code: 'internal', message: '操作失败' } },
-    { status: 500 },
-  )
-}
+import {
+  apiCreateMailboxSchema,
+  apiErrorResponse,
+  parseJsonBody,
+} from '#/server/mail/validation'
 
 export const Route = createFileRoute('/api/v1/mailboxes')({
   server: {
@@ -28,7 +20,7 @@ export const Route = createFileRoute('/api/v1/mailboxes')({
           const data = scoped ? rows.filter((row) => row.id === scoped) : rows
           return Response.json({ ok: true, data })
         } catch (error) {
-          return fail(error)
+          return apiErrorResponse(error)
         }
       },
       POST: async ({ request }) => {
@@ -41,17 +33,9 @@ export const Route = createFileRoute('/api/v1/mailboxes')({
               403,
             )
           }
-          const body = (await request.json()) as {
-            kind?: 'permanent' | 'temp'
-            localPart?: string
-            domainId?: string
-            displayName?: string
-          }
-          if (!body.localPart) {
-            throw new AppError('validation_failed', '缺少 localPart')
-          }
+          const body = await parseJsonBody(request, apiCreateMailboxSchema)
           const row = await createMailbox(user.id, {
-            kind: body.kind ?? 'permanent',
+            kind: body.kind,
             localPart: body.localPart,
             domainId: body.domainId,
             displayName: body.displayName,
@@ -60,7 +44,7 @@ export const Route = createFileRoute('/api/v1/mailboxes')({
           })
           return Response.json({ ok: true, data: row }, { status: 201 })
         } catch (error) {
-          return fail(error)
+          return apiErrorResponse(error)
         }
       },
     },

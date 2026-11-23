@@ -18,7 +18,6 @@ import {
 } from '@remixicon/react'
 
 import { UserAvatar } from '#/components/shell/user-avatar'
-import { clearUserCaches } from '#/lib/api'
 import {
   Dropdown,
   DropdownDivider,
@@ -27,7 +26,7 @@ import {
   DropdownTrigger,
 } from '#/components/base/dropdown/dropdown'
 import { cx } from '#/utils/cx'
-import { authClient } from '#/lib/auth-client'
+import { performSignOut } from '#/lib/sign-out'
 import type { FileRoutesByTo } from '#/routeTree.gen'
 
 const rootApi = getRouteApi('__root__')
@@ -180,14 +179,8 @@ export function SidebarAccount() {
           </DropdownItem>
           <DropdownDivider />
           <DropdownItem
-            onSelect={async () => {
-              await authClient.signOut()
-              // Passkey 等客户端登录不会重建 QueryClient，必须显式清缓存，
-              // 否则换号后首屏会读到上一个账号的邮件/邮箱数据
-              clearUserCaches(queryClient)
-              // 当前路由的守卫会重定向到登录页，invalidate 期间的跳转不算错误
-              await router.invalidate().catch(() => undefined)
-              await navigate({ to: '/login' })
+            onSelect={() => {
+              void performSignOut({ queryClient, router, navigate })
             }}
           >
             <RiLogoutBoxRLine className="size-4" aria-hidden /> 退出登录

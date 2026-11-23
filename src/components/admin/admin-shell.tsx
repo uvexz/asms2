@@ -15,6 +15,7 @@ import {
 import { IconButton } from '#/components/base/buttons/icon-button'
 import { ThemeToggle } from '#/components/application/theme/theme-toggle'
 import { AppShell } from '#/components/shell/app-shell'
+import { ScrollFade, useScrollFade } from '#/components/foundations/scroll-fade/scroll-fade'
 import {
   SidebarAccount,
   SidebarNav,
@@ -82,6 +83,7 @@ function AdminNav({ onNavigate }: { onNavigate?: () => void }) {
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
+  const fade = useScrollFade()
 
   return (
     <AppShell
@@ -105,8 +107,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
       sidebar={(closeNav) => (
         <div className="flex h-full min-h-0 flex-col gap-4">
           <SidebarAccount />
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <AdminNav onNavigate={closeNav} />
+          <div className="relative min-h-0 flex-1">
+            <div onScroll={fade.onScroll} className="h-full overflow-y-auto">
+              <AdminNav onNavigate={closeNav} />
+            </div>
+            <ScrollFade progress={fade.progress} />
           </div>
           <div className="flex items-center justify-between gap-2 border-t border-separator-border pt-3">
             <span className="text-caption-1-regular text-text-tertiary">

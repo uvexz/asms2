@@ -31,6 +31,74 @@ export const dailyUsage = sqliteTable(
   ],
 )
 
+/** 用户级邮箱配额；count 与创建的 mailboxId 一一绑定，删除时精确归还。 */
+export const mailboxQuota = sqliteTable(
+  'mailbox_quota',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    kind: text('kind', { enum: ['permanent', 'temp'] }).notNull(),
+    mailboxId: text('mailbox_id').notNull().unique(),
+    hourBucket: text('hour_bucket'),
+    sentAt: integer('sent_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    index('mailbox_quota_user_kind_idx').on(table.userId, table.kind),
+    index('mailbox_quota_temp_bucket_idx').on(
+      table.userId,
+      table.kind,
+      table.hourBucket,
+    ),
+  ],
+)
+
+/**
+ * 发信业务请求。先持久化稳定 ID + 规范化载荷，再调用服务商。
+ * 重试总是取回同一请求，绝不能因重试生成第二封邮件或第二条消息。
+ */
+export const outboundRequest = sqliteTable(
+  'outbound_request',
+  {
+    id: text('id').primaryKey(),
+    idempotencyKey: text('idempotency_key').notNull().unique(),
+    requestHash: text('request_hash').notNull(),
+    userId: text('user_id').notNull(),
+    mailboxId: text('mailbox_id').notNull(),
+    providerConfigId: text('provider_config_id').notNull(),
+    payloadJson: text('payload_json').notNull(),
+    status: text('status', {
+      enum: [
+        'pending',
+        'processing',
+        'submitted',
+        'succeeded',
+        'failed',
+        'uncertain',
+      ],
+    }).notNull(),
+    providerMessageId: text('provider_message_id'),
+    messageId: text('message_id'),
+    error: text('error'),
+    attempts: integer('attempts').notNull().default(0),
+    usageDate: text('usage_date').notNull(),
+    quotaReserved: integer('quota_reserved', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    index('outbound_request_user_idx').on(table.userId, table.createdAt),
+    index('outbound_request_status_idx').on(table.status, table.updatedAt),
+  ],
+)
+
 /** Webhook 事件台账：既是幂等去重表，也是死信队列 */
 export const webhookEvent = sqliteTable(
   'webhook_event',

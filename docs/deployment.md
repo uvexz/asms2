@@ -46,7 +46,7 @@ server {
   ssl_certificate     /etc/letsencrypt/live/mail.example.com/fullchain.pem;
   ssl_certificate_key /etc/letsencrypt/live/mail.example.com/privkey.pem;
 
-  client_max_body_size 12m;   # 发件附件上限 10MB，留余量
+  client_max_body_size 45m;   # 发件附件合计 10MB，base64 后约 13.4MB，留出 JSON 余量
 
   # HSTS 只能由 TLS 终结方下发；确认全站 https 后再加 preload
   add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
@@ -79,7 +79,7 @@ server {
 * * * * * curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://mail.example.com/api/cron/sweep >/dev/null
 ```
 
-`sweep` 负责：临时邮箱到期落库、grace 后清空邮件、已删除邮箱在保留期与冷却期结束后的邮件/墓碑清理、回收站过期清理、墓碑与 Webhook 事件回收、Telegram update 去重记录与过期绑定码回收。
+`sweep` 负责：临时邮箱到期落库、grace 后清空邮件、已删除邮箱在保留期与冷却期结束后的邮件/墓碑清理、回收站过期清理、墓碑与 Webhook 事件回收、Telegram update 去重记录与过期绑定码回收，以及发信请求的退款对账和 7 天幂等窗口清理。
 
 - 未配置 `CRON_SECRET` 时接口返回 401。
 - 多实例部署时只需**一个**调度源，重复执行是幂等的但浪费。
@@ -111,7 +111,7 @@ turso db dump <db-name> > backup-$(date +%F).sql
 - 成功请求只在耗时 ≥1s 时记录，避免 20s/60s 轮询随打开的标签线性放大日志量；慢请求阈值定义在 `src/server/plugins/request-timing.ts`。
 - 响应头会返回 `x-request-id`（客户端传入合法值时会复用）；`/assets/**`、Vite 模块请求及常见静态文件扩展名不记录，避免日志噪音。
 - 重点指标：收件入库延迟、Webhook 失败率、发件成功率、配额拒绝次数、临时邮箱存量。
-- `webhook_event` 表即死信队列：管理后台「日志 → Webhook」可看失败原因，修复后可重放。
+- `webhook_event` 表即死信队列：管理后台「日志 → Webhook」可查看失败原因；当前没有一键重放入口，需要让服务商重投或按服务商文档人工处理。
 - `unrouted_message` 记录"收下了但没投递"的邮件，排查地址拼写/过期问题。
 
 常见问题：

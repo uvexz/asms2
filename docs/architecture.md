@@ -140,11 +140,11 @@ erDiagram
 
 **站点（3 张）**
 
-| 表              | 关键字段                                                                                                                                                                                                                              | 说明                                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `site_settings` | 单行 `default`；站点资料、注册开关、`email_verification_required`、默认配额、前缀长度、`temp_ttl_minutes`（考察期）、`temp_grace_minutes`、冷却时长、`deleted_mailbox_retention_days`、`allow_temp_send`、`admin_can_read_mail`、时区 | typed 单行配置，零散扩展放 `extra_json`             |
-| `auth_provider` | kind（email/google/github/oidc/passkey）、providerId(UK，运行时 ID 与回调路径段)、displayName、enabled、clientId、clientSecretEnc、issuer、scopes                                                                                     | 登录方式配置，保存后触发 auth 实例重建；OIDC 可多条 |
-| `app_meta`      | key(PK), value                                                                                                                                                                                                                        | 配置版本号等                                        |
+| 表              | 关键字段                                                                                                                                                                                                                                                         | 说明                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `site_settings` | 单行 `default`；站点资料、注册开关、`email_verification_required`、默认配额、前缀长度、`temp_ttl_minutes`（考察期）、`temp_grace_minutes`、冷却时长、`deleted_mailbox_retention_days`、`allow_temp_send`、时区（`admin_can_read_mail` 已废弃，仅为避免删列保留） | typed 单行配置，零散扩展放 `extra_json`             |
+| `auth_provider` | kind（email/google/github/oidc/passkey）、providerId(UK，运行时 ID 与回调路径段)、displayName、enabled、clientId、clientSecretEnc、issuer、scopes                                                                                                                | 登录方式配置，保存后触发 auth 实例重建；OIDC 可多条 |
+| `app_meta`      | key(PK), value                                                                                                                                                                                                                                                   | 配置版本号等                                        |
 
 **邮箱与邮件（4 张）**
 
@@ -165,12 +165,12 @@ erDiagram
 
 **运营（4 张）**
 
-| 表                 | 关键字段                                                                        | 说明                          |
-| ------------------ | ------------------------------------------------------------------------------- | ----------------------------- |
-| `daily_usage`      | userId, usageDate, sentCount, receivedCount，UK(userId,usageDate)               | 日发件配额计数                |
-| `webhook_event`    | endpointId, providerEventId, type, status, payloadJson，UK(endpointId,eventId)  | 幂等去重 + 死信               |
+| 表                 | 关键字段                                                                                                           | 说明                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| `daily_usage`      | userId, usageDate, sentCount, receivedCount，UK(userId,usageDate)                                                  | 日发件配额计数                |
+| `webhook_event`    | endpointId, providerEventId, type, status, payloadJson，UK(endpointId,eventId)                                     | 幂等去重 + 死信               |
 | `unrouted_message` | providerMessageId, from, to, subject, reason(`unknown/expired/domain_disabled/mailbox_disabled/provider_mismatch`) | 无法投递的墓碑，默认保留 7 天 |
-| `audit_log`        | actorUserId, action, targetType, targetId, metaJson, ip, ua                     | 管理操作与管理员读信          |
+| `audit_log`        | actorUserId, action, targetType, targetId, metaJson, ip, ua                                                        | 管理操作审计                  |
 
 ### 3.3 关键索引与约束
 
@@ -223,7 +223,7 @@ erDiagram
 
 ### 4.4 隐私与审计
 
-- `admin_can_read_mail` 默认关闭；开启后读正文也需填写理由并写 `audit_log`。
+- 管理员不能读取邮件正文；`admin_can_read_mail` 列仅为避免破坏性迁移保留，已废弃且不再出现在后台。
 - 服务商 Key、OAuth Secret、Webhook Secret 只存密文，接口只回末四位或 `hasSecret`。
 - 封禁用户立即停止收发并使会话失效，邮件保留 30 天。
 
@@ -379,7 +379,7 @@ Better Auth 的 `emailAndPassword` / `socialProviders` / 插件列表在实例�
 - **枚举**：建邮箱必须登录，也不对外提供"这个地址存不存在"的查询。
 - **滥用**：日发件限额、临时邮箱创建限流、可全站停发，投诉率超阈值就停用域名。
 - **SSRF**：净化阶段不抓任何远程资源；邮件里的图片是浏览器直连，服务端不代取。
-- **审计**：管理写操作、读信、密钥变更全部落 `audit_log`。
+- **审计**：管理写操作、密钥变更全部落 `audit_log`；管理员不能读邮件正文。
 
 ## 8. 技术选型与关键决策
 

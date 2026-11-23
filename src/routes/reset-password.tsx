@@ -42,17 +42,22 @@ function ResetPasswordPage() {
       return
     }
     setLoading(true)
-    const { error } = await authClient.resetPassword({
-      newPassword: password,
-      token,
-    })
-    setLoading(false)
-    if (error) {
-      toast.error(error.message ?? '重置失败，链接可能已过期')
-      return
+    try {
+      const { error } = await authClient.resetPassword({
+        newPassword: password,
+        token,
+      })
+      if (error) {
+        toast.error(error.message ?? '重置失败，链接可能已过期')
+        return
+      }
+      toast.success('密码已重置，请使用新密码登录')
+      await navigate({ to: '/login' })
+    } catch {
+      toast.error('重置失败，请检查网络后重试')
+    } finally {
+      setLoading(false)
     }
-    toast.success('密码已重置，请使用新密码登录')
-    await navigate({ to: '/login' })
   }
 
   return (
@@ -101,6 +106,7 @@ function ResetPasswordPage() {
                 label="新密码"
                 placeholder="至少 8 位字符"
                 autoComplete="new-password"
+                spellCheck="false"
                 isRequired
               />
               <Input
@@ -109,6 +115,7 @@ function ResetPasswordPage() {
                 label="确认新密码"
                 placeholder="再次输入新密码"
                 autoComplete="new-password"
+                spellCheck="false"
                 isRequired
               />
               <Button

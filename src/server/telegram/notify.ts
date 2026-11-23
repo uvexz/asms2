@@ -1,13 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm'
 
 import { db } from '#/db/client'
-import {
-  mailbox,
-  message,
-  messageBody,
-  telegramLink,
-  user,
-} from '#/db/schema'
+import { mailbox, message, messageBody, telegramLink, user } from '#/db/schema'
 import { getSiteSettings } from '#/server/settings'
 import { sendMessage, TelegramError } from './api'
 import type { InlineKeyboard } from './api'

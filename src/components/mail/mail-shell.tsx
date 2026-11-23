@@ -36,6 +36,10 @@ import { ErrorState } from '#/components/application/errors/error-state'
 import { toast } from '#/components/base/toast/toast'
 import { AppShell } from '#/components/shell/app-shell'
 import {
+  ScrollFade,
+  useScrollFade,
+} from '#/components/foundations/scroll-fade/scroll-fade'
+import {
   SidebarAccount,
   SidebarNav,
   SidebarNavButton,
@@ -89,6 +93,7 @@ function RailContent({
   const navigate = useNavigate({ from: '/mail' })
   const queryClient = useQueryClient()
   const quota = useQuery(quotaQuery)
+  const fade = useScrollFade()
   const [deleting, setDeleting] = useState<MailboxView | null>(null)
 
   const permanent = mailboxes.filter((item) => item.kind === 'permanent')
@@ -154,105 +159,110 @@ function RailContent({
         ))}
       </SidebarNav>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mb-1 flex items-center justify-between px-1">
-          <span className="text-caption-1-semibold text-text-tertiary">
-            我的邮箱
-          </span>
-          <IconButton
-            size="small"
-            icon={RiAddLine}
-            aria-label="新建邮箱"
-            onClick={onCreate}
-          />
-        </div>
+      <div className="mb-1 flex items-center justify-between px-1">
+        <span className="text-caption-1-semibold text-text-tertiary">
+          我的邮箱
+        </span>
+        <IconButton
+          size="small"
+          icon={RiAddLine}
+          aria-label="新建邮箱"
+          onClick={onCreate}
+        />
+      </div>
 
-        {loading ? (
-          <div className="flex justify-center py-6">
-            <Spinner className="size-5" />
-          </div>
-        ) : null}
+      <div className="relative min-h-0 flex-1">
+        <div onScroll={fade.onScroll} className="h-full overflow-y-auto">
+          {loading ? (
+            <div className="flex justify-center py-6">
+              <Spinner className="size-5" />
+            </div>
+          ) : null}
 
-        {error ? (
-          <ErrorState
-            compact
-            error={error}
-            onRetry={onRetry}
-            className="px-1"
-          />
-        ) : null}
+          {error ? (
+            <ErrorState
+              compact
+              error={error}
+              onRetry={onRetry}
+              className="px-1"
+            />
+          ) : null}
 
-        <button
-          type="button"
-          onClick={() => select({ mailboxId: undefined, messageId: undefined })}
-          className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-start text-body-regular outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring ${
-            !search.mailboxId
-              ? 'bg-background-tertiary-default font-medium text-text-primary'
-              : 'text-text-secondary hover:bg-background-secondary-hover'
-          }`}
-        >
-          <RiMailLine className="size-4 shrink-0" aria-hidden />
-          <span className="flex-1 truncate">全部邮箱</span>
-        </button>
-
-        {permanent.length > 0 ? (
-          <p className="mt-3 px-1 text-caption-1-regular text-text-tertiary">
-            长期邮箱
-          </p>
-        ) : null}
-        {permanent.map((item) => (
-          <MailboxRow
-            key={item.id}
-            item={item}
-            active={search.mailboxId === item.id}
-            onSelect={() =>
-              select({ mailboxId: item.id, messageId: undefined })
+          <button
+            type="button"
+            onClick={() =>
+              select({ mailboxId: undefined, messageId: undefined })
             }
-            onCopy={() => void copy(item.address)}
-            onDelete={() => setDeleting(item)}
-          />
-        ))}
+            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-start text-body-regular outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring ${
+              !search.mailboxId
+                ? 'bg-background-tertiary-default font-medium text-text-primary'
+                : 'text-text-secondary hover:bg-background-secondary-hover'
+            }`}
+          >
+            <RiMailLine className="size-4 shrink-0" aria-hidden />
+            <span className="flex-1 truncate">全部邮箱</span>
+          </button>
 
-        {temp.length > 0 ? (
-          <p className="mt-3 px-1 text-caption-1-regular text-text-tertiary">
-            临时邮箱
-          </p>
-        ) : null}
-        {temp.map((item) => (
-          <MailboxRow
-            key={item.id}
-            item={item}
-            active={search.mailboxId === item.id}
-            onSelect={() =>
-              select({ mailboxId: item.id, messageId: undefined })
-            }
-            onCopy={() => void copy(item.address)}
-            onDelete={() => setDeleting(item)}
-          />
-        ))}
-
-        {!loading && !error && mailboxes.length === 0 ? (
-          <div className="mt-4 rounded-xl border border-dashed border-border-button-default p-4 text-center">
-            <p className="text-caption-1-regular text-text-tertiary">
-              还没有邮箱
+          {permanent.length > 0 ? (
+            <p className="mt-3 px-1 text-caption-1-regular text-text-tertiary">
+              长期邮箱
             </p>
-            <Button
-              size="small"
-              variant="secondary"
-              className="mt-2"
-              onClick={onCreate}
-            >
-              创建第一个邮箱
-            </Button>
-          </div>
-        ) : null}
+          ) : null}
+          {permanent.map((item) => (
+            <MailboxRow
+              key={item.id}
+              item={item}
+              active={search.mailboxId === item.id}
+              onSelect={() =>
+                select({ mailboxId: item.id, messageId: undefined })
+              }
+              onCopy={() => void copy(item.address)}
+              onDelete={() => setDeleting(item)}
+            />
+          ))}
 
-        {mailboxes.length >= MAILBOX_LIST_LIMIT ? (
-          <p className="mt-3 px-1 text-caption-1-regular text-text-tertiary">
-            仅显示最近 {MAILBOX_LIST_LIMIT}{' '}
-            个邮箱，更早的请先删除不再使用的地址。
-          </p>
-        ) : null}
+          {temp.length > 0 ? (
+            <p className="mt-3 px-1 text-caption-1-regular text-text-tertiary">
+              临时邮箱
+            </p>
+          ) : null}
+          {temp.map((item) => (
+            <MailboxRow
+              key={item.id}
+              item={item}
+              active={search.mailboxId === item.id}
+              onSelect={() =>
+                select({ mailboxId: item.id, messageId: undefined })
+              }
+              onCopy={() => void copy(item.address)}
+              onDelete={() => setDeleting(item)}
+            />
+          ))}
+
+          {!loading && !error && mailboxes.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-border-button-default p-4 text-center">
+              <p className="text-caption-1-regular text-text-tertiary">
+                还没有邮箱
+              </p>
+              <Button
+                size="small"
+                variant="secondary"
+                className="mt-2"
+                onClick={onCreate}
+              >
+                创建第一个邮箱
+              </Button>
+            </div>
+          ) : null}
+
+          {mailboxes.length >= MAILBOX_LIST_LIMIT ? (
+            <p className="mt-3 px-1 text-caption-1-regular text-text-tertiary">
+              仅显示最近 {MAILBOX_LIST_LIMIT}{' '}
+              个邮箱，更早的请先删除不再使用的地址。
+            </p>
+          ) : null}
+        </div>
+        <ScrollFade progress={fade.progress} />
       </div>
 
       <div className="rounded-xl border border-separator-border bg-background-primary-default p-3">
