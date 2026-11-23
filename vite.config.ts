@@ -52,6 +52,8 @@ const config = defineConfig({
           headers: { 'cache-control': 'private, no-store' },
         },
         '/verify-email': { headers: { 'cache-control': 'private, no-store' } },
+        // API 响应一律不进入共享缓存(包括报错与鉴权失败)
+        '/api/**': { headers: { 'cache-control': 'private, no-store' } },
       },
       rollupConfig: {
         external: [/^@sentry\//],

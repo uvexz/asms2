@@ -360,6 +360,10 @@ async function handleNew(
   }
 
   const settings = await getSiteSettings()
+  if (settings.prefixMax < 8) {
+    await reply(runtime, chatId, '站点前缀配置异常,请联系管理员。')
+    return
+  }
   const localPart =
     prefix?.trim().toLowerCase() ||
     randomNameLocalPart({

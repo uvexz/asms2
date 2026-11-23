@@ -56,10 +56,22 @@ export function splitAddressList(input: string): string[] {
   return result
 }
 
+function sanitizeDisplayName(name: string): string {
+  // 防止 CR/LF 头注入、逗号/分号把显示名拆成多个收件人。
+  return (
+    name
+      // eslint-disable-next-line no-control-regex -- 明确过滤控制字符
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/[",;<>]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  )
+}
+
 export function formatAddress(address: ParsedAddress): string {
   if (!address.name) return address.address
-  const safeName = address.name.replace(/["<>]/g, '')
-  return `${safeName} <${address.address}>`
+  const safeName = sanitizeDisplayName(address.name)
+  return safeName ? `${safeName} <${address.address}>` : address.address
 }
 
 export function splitMailboxAddress(address: string): {

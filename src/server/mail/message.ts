@@ -188,7 +188,7 @@ export async function listMessages(
 export async function getMessage(
   userId: string,
   messageId: string,
-  options: { includeRaw?: boolean; includeHeaders?: boolean } = {},
+  options: { includeHeaders?: boolean } = {},
 ) {
   const row = (
     await db
@@ -204,7 +204,14 @@ export async function getMessage(
         and(
           eq(message.id, messageId),
           eq(message.userId, userId),
+          eq(mailbox.userId, userId),
           ne(mailbox.status, 'deleted'),
+          or(
+            ne(mailbox.kind, 'temp'),
+            isNotNull(mailbox.retainedAt),
+            isNull(mailbox.expiresAt),
+            gt(mailbox.expiresAt, new Date()),
+          ),
         ),
       )
       .limit(1)
@@ -238,7 +245,6 @@ export async function getMessage(
       size: item.size,
       isInline: item.isInline,
     })),
-    ...(options.includeRaw ? { htmlRaw: row.body?.htmlRaw ?? null } : {}),
     ...(options.includeHeaders
       ? {
           headers: row.body?.headersJson

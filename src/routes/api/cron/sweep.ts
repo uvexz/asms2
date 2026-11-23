@@ -17,16 +17,8 @@ export const Route = createFileRoute('/api/cron/sweep')({
         const stats = await sweep()
         return Response.json({ ok: true, stats })
       },
-      GET: async ({ request }) => {
-        const secret = process.env.CRON_SECRET ?? ''
-        const header = request.headers.get('authorization') ?? ''
-        const token = header.replace(/^Bearer\s+/i, '')
-        if (!secret || !safeEqual(token, secret)) {
-          return new Response('unauthorized', { status: 401 })
-        }
-        const stats = await sweep()
-        return Response.json({ ok: true, stats })
-      },
+      GET: async () =>
+        new Response(null, { status: 405, headers: { allow: 'POST' } }),
     },
   },
 })

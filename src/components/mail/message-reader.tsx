@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
+import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import {
+  RiArchiveLine,
   RiArrowLeftLine,
   RiAttachment2,
   RiCornerUpLeftLine,
   RiDeleteBinLine,
+  RiInboxLine,
   RiMailOpenLine,
   RiMailUnreadLine,
+  RiSpam2Line,
   RiStarFill,
   RiStarLine,
 } from '@remixicon/react'
@@ -53,6 +56,8 @@ function buildSrcDoc(html: string, allowRemoteImages: boolean) {
 </style></head><body>${html}</body></html>`
 }
 
+const rootApi = getRouteApi('__root__')
+
 export function MessageReader({
   messageId,
   mailboxes,
@@ -63,8 +68,9 @@ export function MessageReader({
   const navigate = useNavigate({ from: '/mail' })
   const queryClient = useQueryClient()
   const { openCompose } = useCompose()
+  const { site } = rootApi.useLoaderData()
   const [allowImages, setAllowImages] = useState(false)
-  const fade = useScrollFade()
+  const { progress, onScroll, reset } = useScrollFade()
   const markUnreadId = useRef<string | null>(null)
   const autoReadId = useRef<string | null>(null)
 
@@ -73,8 +79,8 @@ export function MessageReader({
     setAllowImages(false)
     markUnreadId.current = null
     autoReadId.current = null
-    fade.reset()
-  }, [messageId, fade])
+    reset()
+  }, [messageId, reset])
 
   const query = useQuery(messageQuery(messageId))
 
@@ -162,8 +168,13 @@ export function MessageReader({
   }
 
   const fromMailbox = mailboxes.find((item) => item.id === message.mailboxId)
+  const canReply = Boolean(
+    fromMailbox && (fromMailbox.kind === 'permanent' || site.allowTempSend),
+  )
 
-  async function act(action: 'trash' | 'unread' | 'star') {
+  async function act(
+    action: 'trash' | 'unread' | 'star' | 'archive' | 'spam' | 'inbox',
+  ) {
     if (!message || updating) return
 
     try {
@@ -178,6 +189,25 @@ export function MessageReader({
       if (action === 'unread') {
         markUnreadId.current = message.id
         await runUpdateAsync({ id: message.id, isRead: false })
+        return
+      }
+
+      if (action === 'archive' || action === 'spam' || action === 'inbox') {
+        await runUpdateAsync({ id: message.id, folder: action })
+        removeMessageFromCaches(queryClient, message.id)
+        toast.success(
+          action === 'archive'
+            ? '已移入归档'
+            : action === 'spam'
+              ? '已标记为垃圾邮件'
+              : '已移回收件箱',
+        )
+        if (action === 'inbox') {
+          void navigate({
+            to: '/mail',
+            search: (prev) => ({ ...prev, folder: 'inbox' }),
+          })
+        }
         return
       }
 
@@ -205,9 +235,9 @@ export function MessageReader({
             size="small"
             icon={RiCornerUpLeftLine}
             aria-label="回复"
-            disabled={!fromMailbox}
+            disabled={!canReply}
             onClick={() => {
-              if (!fromMailbox) return
+              if (!canReply || !fromMailbox) return
               openCompose({
                 fromMailboxId: fromMailbox.id,
                 to: message.fromAddress,
@@ -224,6 +254,22 @@ export function MessageReader({
           aria-label={message.isStarred ? '取消星标' : '加星标'}
           disabled={updating}
           onClick={() => void act('star')}
+        />
+        <IconButton
+          size="small"
+          icon={message.folder === 'archive' ? RiInboxLine : RiArchiveLine}
+          aria-label={message.folder === 'archive' ? '移回收件箱' : '移入归档'}
+          disabled={updating}
+          onClick={() =>
+            void act(message.folder === 'archive' ? 'inbox' : 'archive')
+          }
+        />
+        <IconButton
+          size="small"
+          icon={message.folder === 'spam' ? RiInboxLine : RiSpam2Line}
+          aria-label={message.folder === 'spam' ? '移回收件箱' : '标记垃圾邮件'}
+          disabled={updating}
+          onClick={() => void act(message.folder === 'spam' ? 'inbox' : 'spam')}
         />
         <IconButton
           size="small"
@@ -246,7 +292,7 @@ export function MessageReader({
       </header>
 
       <div className="relative min-h-0 flex-1">
-        <div onScroll={fade.onScroll} className="h-full overflow-y-auto">
+        <div onScroll={onScroll} className="h-full overflow-y-auto">
           <div className="flex flex-col gap-4 p-5 lg:p-8">
             <div className="flex flex-col gap-1">
               <h1 className="text-title-3-semibold text-text-primary">
@@ -325,9 +371,9 @@ export function MessageReader({
                 <Button
                   variant="secondary"
                   leadingIcon={RiCornerUpLeftLine}
-                  disabled={!fromMailbox}
+                  disabled={!canReply}
                   onClick={() => {
-                    if (!fromMailbox) return
+                    if (!canReply || !fromMailbox) return
                     openCompose({
                       fromMailboxId: fromMailbox.id,
                       to: message.fromAddress,
@@ -343,7 +389,7 @@ export function MessageReader({
             ) : null}
           </div>
         </div>
-        <ScrollFade progress={fade.progress} />
+        <ScrollFade progress={progress} />
       </div>
     </section>
   )

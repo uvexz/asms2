@@ -51,7 +51,8 @@ export const mailbox = sqliteTable(
     deletedAt: integer('deleted_at', { mode: 'timestamp' }),
   },
   (table) => [
-    uniqueIndex('mailbox_domain_local_idx').on(table.domainId, table.localPart),
+    // 非唯一:地址唯一性由 mailbox.address 保证;唯一索引会让软删墓碑永远占住前缀
+    index('mailbox_domain_local_idx').on(table.domainId, table.localPart),
     index('mailbox_user_kind_idx').on(table.userId, table.kind, table.status),
     index('mailbox_sweep_idx').on(table.kind, table.status, table.expiresAt),
     index('mailbox_user_kind_created_idx').on(
@@ -124,6 +125,7 @@ export const message = sqliteTable(
 
     sentAt: integer('sent_at', { mode: 'timestamp' }),
     receivedAt: integer('received_at', { mode: 'timestamp' }),
+    /** @deprecated 未使用;保留列避免 SQLite 重建表 */
     errorMessage: text('error_message'),
     /** 移入回收站的时间；回收站保留期从这里算，移出时置空 */
     trashedAt: integer('trashed_at', { mode: 'timestamp' }),
@@ -166,6 +168,7 @@ export const messageBody = sqliteTable('message_body', {
   messageId: text('message_id')
     .primaryKey()
     .references(() => message.id, { onDelete: 'cascade' }),
+  /** @deprecated 历史原文;新数据不再写入,渲染只使用 htmlSanitized */
   htmlRaw: text('html_raw'),
   htmlSanitized: text('html_sanitized'),
   textBody: text('text_body'),

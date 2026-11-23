@@ -4,7 +4,6 @@ import type { FormEvent, ReactNode } from "react";
 import { useState } from "react";
 import { RiMailCheckLine } from "@remixicon/react";
 import { Button } from "#/components/base/buttons/button";
-import { Checkbox } from "#/components/base/checkbox/checkbox";
 import { Divider } from "#/components/base/divider/divider";
 import { Input } from "#/components/base/input/input";
 import { InputOtp } from "#/components/base/input-otp/input-otp";
@@ -14,13 +13,6 @@ import { SOCIAL_PROVIDERS  } from "#/components/base/social-button/social-provid
 import type {SocialProvider} from "#/components/base/social-button/social-providers";
 import { useTemplateCopy } from "#/components/foundations/template-copy/template-copy";
 import { cx } from "#/utils/cx";
-
-// Re-exported so `media` has a batteries-included option and the registry
-// installs it alongside the card. Nothing here imports it otherwise.
-export {
-  AuthMediaCarousel,
-  type AuthMediaSlide,
-} from "#/components/application/auth/auth-media-carousel";
 
 /**
  * Sign-in and sign-up cards built on the social buttons.
@@ -175,7 +167,6 @@ export function AuthCard({
 }: AuthCardProps) {
   const localize = useTemplateCopy();
   const TitleHeading = `h${headingLevel}` as const;
-  const [remember, setRemember] = useState(true);
   const [code, setCode] = useState("");
   const copy = COPY[mode];
   const signup = mode === "signup";
@@ -274,7 +265,7 @@ export function AuthCard({
           </div>
         ) : null}
 
-        {signup && !confirmPassword ? (
+        {signup ? (
           <Input name="name" label="Full name" placeholder="Ada Lovelace" isRequired />
         ) : null}
 
@@ -330,10 +321,7 @@ export function AuthCard({
         )}
 
         {signup || verify ? null : (
-          <div className="flex items-center justify-between">
-            <Checkbox size="sm" isSelected={remember} onChange={setRemember}>
-              Remember me
-            </Checkbox>
+          <div className="flex justify-end">
             <LinkButton href={forgotHref}>Forgot password?</LinkButton>
           </div>
         )}

@@ -79,7 +79,7 @@ server {
 * * * * * curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://mail.example.com/api/cron/sweep >/dev/null
 ```
 
-`sweep` 负责：临时邮箱到期落库、grace 后清空邮件、已删除邮箱在保留期与冷却期结束后的邮件/墓碑清理、回收站过期清理、墓碑与 Webhook 事件回收、Telegram update 去重记录与过期绑定码回收，以及发信请求的退款对账和 7 天幂等窗口清理。
+`sweep` 负责：临时邮箱到期落库、grace 后清空邮件、已删除邮箱在保留期与冷却期结束后的邮件/墓碑清理、回收站过期清理、墓碑与 Webhook 事件回收、Telegram update 去重记录与过期绑定码回收，以及发信请求的退款对账、7 天幂等窗口清理、90 天 uncertain 归档和 365 天审计日志清理。
 
 - 未配置 `CRON_SECRET` 时接口返回 401。
 - 多实例部署时只需**一个**调度源，重复执行是幂等的但浪费。

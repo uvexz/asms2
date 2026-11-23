@@ -1,6 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
 
 import { safeEqual } from '#/server/crypto/secret-box'
+import { logError } from '#/server/errors'
+import { readLimitedText } from '#/server/mail/validation'
 import { getTelegramRuntime } from '#/server/telegram/config'
 import { handleTelegramUpdate } from '#/server/telegram/update'
 import type { TgUpdate } from '#/server/telegram/api'
@@ -16,6 +18,8 @@ import type { TgUpdate } from '#/server/telegram/api'
 export const Route = createFileRoute('/api/telegram/webhook')({
   server: {
     handlers: {
+      GET: async () =>
+        new Response(null, { status: 405, headers: { allow: 'POST' } }),
       POST: async ({ request }) => {
         const runtime = await getTelegramRuntime()
         if (!runtime || !runtime.webhookSecret) {
@@ -30,7 +34,9 @@ export const Route = createFileRoute('/api/telegram/webhook')({
 
         let update: TgUpdate
         try {
-          update = (await request.json()) as TgUpdate
+          update = JSON.parse(
+            await readLimitedText(request, 1_000_000),
+          ) as TgUpdate
         } catch {
           return new Response('bad request', { status: 400 })
         }
@@ -44,7 +50,7 @@ export const Route = createFileRoute('/api/telegram/webhook')({
           return Response.json({ ok: true })
         } catch (error) {
           // 只有基础设施级错误会走到这里；返回 5xx 让 Telegram 按退避重试
-          console.error('[telegram] webhook failed:', error)
+          logError('[telegram] webhook failed:', error)
           return new Response('internal error', { status: 500 })
         }
       },

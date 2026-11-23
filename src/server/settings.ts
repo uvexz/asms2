@@ -88,6 +88,8 @@ export async function getPublicSiteConfig() {
     permanentPrefixMin: s.permanentPrefixMin,
     tempPrefixMin: s.tempPrefixMin,
     prefixMax: s.prefixMax,
+    allowTempSend: s.allowTempSend,
+    allowUserDomainChoice: s.allowUserDomainChoice,
     tempTtlMinutes: s.tempTtlMinutes,
     trashRetentionDays: s.trashRetentionDays,
     orphanRetentionDays: s.orphanRetentionDays,

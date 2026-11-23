@@ -13,6 +13,7 @@ import {
 } from '#/server/fns/mail'
 import { getPublicLoginConfigFn, getSessionFn } from '#/server/fns/site'
 
+import { MAILBOX_LIST_LIMIT } from '#/lib/limits'
 import { queryKeys } from '#/lib/query-keys'
 import type { MailFolder, MessageListFilters } from '#/lib/query-keys'
 
@@ -33,7 +34,8 @@ export function unwrap<T>(result: Result<T>): T {
 export const sessionQuery = queryOptions({
   queryKey: queryKeys.session,
   queryFn: () => getSessionFn(),
-  staleTime: 30_000,
+  // 路由守卫每次导航都拿最新会话,封禁/降权立即生效
+  staleTime: 0,
 })
 
 /** 登录方式配置只给登录/注册/设置页用，不再塞进根 loader */
@@ -49,6 +51,22 @@ export const mailboxesQuery = queryOptions({
   staleTime: 15_000,
   refetchInterval: 60_000,
 })
+
+/** 侧栏用无限分页:临时邮箱不设总量上限,不能只显示前 200 个。 */
+export function mailboxesInfiniteQuery() {
+  return infiniteQueryOptions({
+    queryKey: [...queryKeys.mailboxes, 'pages'] as const,
+    queryFn: async ({ pageParam }) =>
+      unwrap(await listMailboxesFn({ data: { offset: pageParam } })),
+    initialPageParam: 0,
+    getNextPageParam: (last, all) =>
+      last.length === MAILBOX_LIST_LIMIT
+        ? all.length * MAILBOX_LIST_LIMIT
+        : undefined,
+    staleTime: 15_000,
+    refetchInterval: 60_000,
+  })
+}
 
 export const quotaQuery = queryOptions({
   queryKey: queryKeys.quota,

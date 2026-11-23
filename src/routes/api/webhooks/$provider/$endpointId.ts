@@ -1,20 +1,23 @@
 import { createFileRoute } from '@tanstack/react-router'
 
-import { AppError } from '#/server/errors'
+import { AppError, logError } from '#/server/errors'
 import { ProviderError } from '#/server/providers'
+import { readLimitedText } from '#/server/mail/validation'
 import { processWebhook } from '#/server/webhooks/process'
 
 export const Route = createFileRoute('/api/webhooks/$provider/$endpointId')({
   server: {
     handlers: {
+      GET: async () =>
+        new Response(null, { status: 405, headers: { allow: 'POST' } }),
       POST: async ({ request, params }) => {
-        const rawBody = await request.text()
         const headers: Record<string, string> = {}
         request.headers.forEach((value, key) => {
           headers[key.toLowerCase()] = value
         })
 
         try {
+          const rawBody = await readLimitedText(request, 5_000_000)
           const result = await processWebhook({
             providerKind: params.provider,
             endpointId: params.endpointId,
@@ -43,7 +46,7 @@ export const Route = createFileRoute('/api/webhooks/$provider/$endpointId')({
             )
           }
           // 其它错误返回 5xx 让服务商按退避策略重试
-          console.error('[webhook] failed:', error)
+          logError('[webhook] failed:', error)
           return Response.json(
             { ok: false, error: 'webhook processing failed' },
             { status: 500 },

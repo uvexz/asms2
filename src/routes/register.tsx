@@ -64,7 +64,16 @@ function RegisterPage() {
     if (loading) return
     const email = String(data.get('email') ?? '')
     const password = String(data.get('password') ?? '')
+    const confirmPassword = String(data.get('confirmPassword') ?? '')
     const name = String(data.get('name') ?? '') || email.split('@')[0]
+    if (password.length < 8) {
+      toast.error('密码至少需要 8 位字符')
+      return
+    }
+    if (password !== confirmPassword) {
+      toast.error('两次输入的密码不一致')
+      return
+    }
 
     setLoading(true)
     try {

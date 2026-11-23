@@ -15,7 +15,15 @@ export const Route = createFileRoute('/api/v1/mailboxes')({
       GET: async ({ request }) => {
         try {
           const { user, mailboxId: scoped } = await authenticateApiKey(request)
-          const rows = await listMailboxes(user.id)
+          const offset = Number(
+            new URL(request.url).searchParams.get('offset') ?? 0,
+          )
+          const rows = await listMailboxes(
+            user.id,
+            Number.isSafeInteger(offset) && offset > 0
+              ? Math.min(offset, 100_000)
+              : 0,
+          )
           // Key 绑定单邮箱时只暴露该邮箱，避免枚举同账号下的其他地址
           const data = scoped ? rows.filter((row) => row.id === scoped) : rows
           return Response.json({ ok: true, data })

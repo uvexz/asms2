@@ -65,7 +65,7 @@ Resend 控制台 → Webhooks → 添加：
 
 - `from` 域名必须与已验证域名**完全一致**；验证了 `send.example.com` 不能用 `example.com` 发。
 - 默认的 `onboarding@resend.dev` 只能发给账号邮箱，生产必须用自有域名。
-- 速率：Resend 默认约 **2 req/s**，服务层按服务商串行化，超限应退避重试。
+- 速率:Resend 默认约 **2 req/s**;429/408 返回 `provider_retryable`,退款后用同一幂等键重试,不要新建幂等键。
 - 附件：单封 ≤10MB、≤3 个（本项目限制），base64 传输；批量接口不支持附件。
 - 幂等：每封带 `idempotencyKey = send/{mailboxId}/{uuid}`，避免重试造成重复投递。
 - SDK 不抛异常而是返回 `{ data, error }`，服务层已统一转成 `ProviderError`。

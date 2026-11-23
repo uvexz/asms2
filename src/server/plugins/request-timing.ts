@@ -67,6 +67,14 @@ export default definePlugin((nitroApp) => {
         // 路由自己设置过的头（例如更严格的 CSP）优先
         if (!res.headers.has(name)) res.headers.set(name, value)
       }
+      // API 响应(尤其 401/400)也绝不能进入共享缓存;routeRules 对
+      // 直接返回 Response 的分支不一定生效,这里统一兜底。
+      if (
+        asRuntimeEvent(event).url.pathname.startsWith('/api/') &&
+        !res.headers.has('cache-control')
+      ) {
+        res.headers.set('cache-control', 'private, no-store')
+      }
     } catch {
       // 响应头不可变（已发送）时忽略
     }

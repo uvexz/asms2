@@ -84,7 +84,10 @@ function isVisible(item: MailboxView) {
 }
 
 /** 侧栏邮箱列表：上限见 MAILBOX_LIST_LIMIT，未读数用一条 GROUP BY 聚合 */
-export async function listMailboxes(userId: string): Promise<MailboxView[]> {
+export async function listMailboxes(
+  userId: string,
+  offset = 0,
+): Promise<MailboxView[]> {
   const rows = await db
     .select({
       id: mailbox.id,
@@ -103,8 +106,9 @@ export async function listMailboxes(userId: string): Promise<MailboxView[]> {
     .from(mailbox)
     .leftJoin(domain, eq(domain.id, mailbox.domainId))
     .where(and(eq(mailbox.userId, userId), ne(mailbox.status, 'deleted')))
-    .orderBy(desc(mailbox.createdAt))
+    .orderBy(desc(mailbox.createdAt), desc(mailbox.id))
     .limit(MAILBOX_LIST_LIMIT)
+    .offset(offset)
 
   if (rows.length === 0) return []
 
@@ -218,7 +222,11 @@ export async function createMailbox(
   const localPart = validateLocalPart(input.localPart, input.kind, settings, {
     allowReserved: input.allowReserved,
   })
-  const targetDomain = await resolveDomain(input.kind, input.domainId)
+  // 关闭域名选择时强制使用站点默认域,API 也不能绕过
+  const targetDomain = await resolveDomain(
+    input.kind,
+    settings.allowUserDomainChoice ? input.domainId : undefined,
+  )
 
   const now = Date.now()
   const mailboxId = idPart()
@@ -297,7 +305,11 @@ export async function removeMailbox(userId: string, mailboxId: string) {
   const row = await getMailboxOrThrow(userId, mailboxId, {
     allowExpired: true,
   })
-  await softDeleteMailbox({ id: row.id, address: row.address })
+  await softDeleteMailbox({
+    id: row.id,
+    address: row.address,
+    kind: row.kind,
+  })
 
   return { id: row.id }
 }
@@ -312,23 +324,6 @@ export async function updateMailboxProfile(
     .update(mailbox)
     .set({ displayName: patch.displayName ?? null, updatedAt: new Date() })
     .where(eq(mailbox.id, row.id))
-}
-
-/**
- * 临时邮箱在考察期内收到了邮件：永久保留。
- * 置空 expiresAt 让清理任务不再扫描它，retainedAt 作为「已激活」的标记。
- */
-export async function retainTempMailbox(mailboxId: string, receivedAt: Date) {
-  const now = new Date()
-  await db
-    .update(mailbox)
-    .set({
-      expiresAt: null,
-      retainedAt: receivedAt,
-      lastReceivedAt: receivedAt,
-      updatedAt: now,
-    })
-    .where(eq(mailbox.id, mailboxId))
 }
 
 export async function listSelectableDomains(kind: MailboxKind) {
@@ -351,6 +346,7 @@ export async function listSelectableDomains(kind: MailboxKind) {
     )
     .orderBy(
       desc(kind === 'temp' ? domain.isDefaultTemp : domain.isDefaultPermanent),
+      desc(domain.createdAt),
     )
   return rows
 }

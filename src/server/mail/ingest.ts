@@ -10,6 +10,7 @@ import {
   message,
   messageBody,
   unroutedMessage,
+  user,
 } from '#/db/schema'
 import type {
   InboundContent,
@@ -17,7 +18,11 @@ import type {
   MailProvider,
   ProviderRuntimeConfig,
 } from '#/server/providers'
-import { getSiteSettings } from '#/server/settings'
+import { isUniqueConstraintError, logError } from '#/server/errors'
+import {
+  getSiteSettings,
+  isEmailVerificationSatisfied,
+} from '#/server/settings'
 import { notifyInboundMessage } from '#/server/telegram/notify'
 import {
   parseAddress,
@@ -30,12 +35,18 @@ import { makeSnippet, sanitizeEmailHtml, sanitizedHtmlToText } from './content'
 import { usageDateFor } from './quota'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
+const MAX_INBOUND_HTML_CHARS = 2_000_000
+const MAX_INBOUND_TEXT_CHARS = 2_000_000
+const MAX_SUBJECT_CHARS = 1_000
+const MAX_INBOUND_ATTACHMENTS = 100
+const MAX_INBOUND_RECIPIENTS = 100
 
 export type UnroutedReason =
   | 'unknown'
   | 'expired'
   | 'domain_disabled'
   | 'mailbox_disabled'
+  | 'account_disabled'
   | 'provider_mismatch'
 
 export type IngestOutcome =
@@ -65,26 +76,38 @@ async function recordUnrouted(params: {
   subject?: string | null
   reason: UnroutedReason
   payload: unknown
+  retentionDays?: number
 }) {
   const existing = await db
     .select({ id: unroutedMessage.id })
     .from(unroutedMessage)
-    .where(eq(unroutedMessage.providerMessageId, params.providerMessageId))
+    .where(
+      and(
+        eq(unroutedMessage.providerConfigId, params.providerConfigId),
+        eq(unroutedMessage.providerMessageId, params.providerMessageId),
+      ),
+    )
     .limit(1)
   if (existing.length > 0) return
 
-  await db.insert(unroutedMessage).values({
-    id: idPart(),
-    providerConfigId: params.providerConfigId,
-    providerMessageId: params.providerMessageId,
-    fromAddress: params.from,
-    toJson: JSON.stringify(params.to),
-    subject: params.subject ?? null,
-    reason: params.reason,
-    payloadJson: JSON.stringify(params.payload).slice(0, 20_000),
-    createdAt: new Date(),
-    expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
-  })
+  try {
+    await db.insert(unroutedMessage).values({
+      id: idPart(),
+      providerConfigId: params.providerConfigId,
+      providerMessageId: params.providerMessageId,
+      fromAddress: params.from,
+      toJson: JSON.stringify(params.to),
+      subject: params.subject ?? null,
+      reason: params.reason,
+      payloadJson: JSON.stringify(params.payload).slice(0, 20_000),
+      createdAt: new Date(),
+      expiresAt: new Date(
+        Date.now() + (params.retentionDays ?? 7) * 24 * 3600 * 1000,
+      ),
+    })
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) throw error
+  }
 }
 
 /**
@@ -115,9 +138,19 @@ export async function ingestInbound(params: {
     }
   }
 
-  const recipients = parseAddressList(data.to)
+  const recipients = parseAddressList(data.to).slice(0, MAX_INBOUND_RECIPIENTS)
   const addresses = recipients.map((item) => item.address)
   if (addresses.length === 0) {
+    await recordUnrouted({
+      providerConfigId,
+      providerMessageId: data.providerMessageId,
+      from: data.from,
+      to: [],
+      subject: data.subject,
+      reason: 'unknown',
+      payload: data,
+      retentionDays: settings.orphanRetentionDays,
+    })
     return { status: 'unrouted', reason: 'unknown' }
   }
 
@@ -138,10 +171,13 @@ export async function ingestInbound(params: {
   const candidates = await db
     .select({
       mailbox,
+      banned: user.banned,
+      emailVerified: user.emailVerified,
       domainProviderConfigId: domain.providerConfigId,
       domainReceivingEnabled: domain.receivingEnabled,
     })
     .from(mailbox)
+    .innerJoin(user, eq(user.id, mailbox.userId))
     .leftJoin(domain, eq(domain.id, mailbox.domainId))
     .where(inArray(mailbox.address, lookupAddresses))
 
@@ -164,6 +200,7 @@ export async function ingestInbound(params: {
       subject: data.subject,
       reason,
       payload: data,
+      retentionDays: settings.orphanRetentionDays,
     })
     return { status: 'unrouted', reason }
   }
@@ -178,6 +215,11 @@ export async function ingestInbound(params: {
   }
   if (!matched.domainReceivingEnabled) return unrouted('domain_disabled')
   if (target.status === 'disabled') return unrouted('mailbox_disabled')
+  if (matched.banned) return unrouted('account_disabled')
+  if (!(await isEmailVerificationSatisfied(matched.emailVerified))) {
+    return unrouted('account_disabled')
+  }
+  if (target.status === 'deleted') return unrouted('mailbox_disabled')
 
   if (
     target.kind === 'temp' &&
@@ -206,11 +248,15 @@ export async function ingestInbound(params: {
     data.content ??
     (await provider.getInbound(data.providerMessageId, runtime))
   const headers = content.headers ?? {}
-  const rawHtml = content.html ?? ''
+  const rawHtml = (content.html ?? '').slice(0, MAX_INBOUND_HTML_CHARS)
   const sanitized = rawHtml ? sanitizeEmailHtml(rawHtml) : ''
-  const plain =
+  const plain = (
     content.text ?? (sanitized ? sanitizedHtmlToText(sanitized) : '')
-  const subject = data.subject ?? (headers['subject'] || '(无主题)')
+  ).slice(0, MAX_INBOUND_TEXT_CHARS)
+  const subject = (data.subject || headers['subject'] || '(无主题)').slice(
+    0,
+    MAX_SUBJECT_CHARS,
+  )
   const from = parseAddress(data.from)
   // 服务商给的时间串非法时退回当前时间，否则入库报错会让服务商无限重投
   const parsedReceivedAt = data.receivedAt ? new Date(data.receivedAt) : null
@@ -219,10 +265,11 @@ export async function ingestInbound(params: {
       ? parsedReceivedAt
       : new Date()
 
-  const attachmentMetas =
+  const attachmentMetas = (
     content.attachments && content.attachments.length > 0
       ? content.attachments
       : (data.attachments ?? [])
+  ).slice(0, MAX_INBOUND_ATTACHMENTS)
 
   const messageId = idPart()
   const now = new Date()
@@ -260,7 +307,7 @@ export async function ingestInbound(params: {
     }),
     db.insert(messageBody).values({
       messageId,
-      htmlRaw: rawHtml || null,
+      // 原文不落库:渲染只用净化后的版本,避免规则出现两套
       htmlSanitized: sanitized || null,
       textBody: plain || null,
       headersJson: JSON.stringify(headers).slice(0, 20_000),
@@ -315,7 +362,7 @@ export async function ingestInbound(params: {
   try {
     await db.batch(statements as never)
   } catch (error) {
-    if (error instanceof Error && /unique|constraint/i.test(error.message)) {
+    if (isUniqueConstraintError(error)) {
       return { status: 'duplicate' }
     }
     throw error
@@ -324,7 +371,7 @@ export async function ingestInbound(params: {
   // Telegram 推送是附加能力：不 await，避免 Telegram 抖动拖慢 Resend 的 webhook 响应；
   // Node 常驻进程会继续把推送跑完，失败只记日志。
   void notifyInboundMessage(messageId).catch((error) => {
-    console.error('[telegram] notify failed after ingest:', error)
+    logError('[telegram] notify failed after ingest:', error)
   })
 
   return { status: 'stored', messageId }

@@ -1,18 +1,22 @@
-import { and, eq, lt, or, sql } from 'drizzle-orm'
+import { and, eq, gt, lt, or, sql } from 'drizzle-orm'
 import { customAlphabet } from 'nanoid'
 
 import { db } from '#/db/client'
 import {
+  auditLog,
+  domain,
+  mailbox,
   message,
   providerConfig,
   webhookEndpoint,
   webhookEvent,
 } from '#/db/schema'
 import { decryptSecret } from '#/server/crypto/secret-box'
-import { AppError } from '#/server/errors'
+import { AppError, logError } from '#/server/errors'
 import { ingestInbound } from '#/server/mail/ingest'
 import { getProvider } from '#/server/providers'
 import type {
+  MessageStatus,
   ProviderRuntimeConfig,
   VerifiedWebhookEvent,
 } from '#/server/providers'
@@ -24,6 +28,9 @@ const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
  * 允许服务商重投时重新抢占；入库本身按 providerMessageId 幂等，重跑是安全的。
  */
 const STALE_RECEIVED_MS = 5 * 60 * 1000
+/** 投诉自动停用阈值(近 7 天) */
+const COMPLAINT_DISABLE_THRESHOLD = 5
+const COMPLAINT_WINDOW_MS = 7 * 24 * 3600 * 1000
 
 /** 投递状态只允许单向推进，避免乱序到达的 delivery_delayed 把 delivered 改回 sent */
 const STATUS_RANK: Record<string, number> = {
@@ -132,6 +139,141 @@ async function claimEvent(params: {
   return reclaimed[0]?.id ?? null
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function outboundMessageExists(
+  providerConfigId: string,
+  providerMessageId: string,
+): Promise<boolean> {
+  return Boolean(
+    (
+      await db
+        .select({ id: message.id })
+        .from(message)
+        .where(
+          and(
+            eq(message.providerConfigId, providerConfigId),
+            eq(message.providerMessageId, providerMessageId),
+            eq(message.direction, 'outbound'),
+          ),
+        )
+        .limit(1)
+    ).at(0),
+  )
+}
+
+/** 状态事件可能比 sendMail 的本地落库更早到达,短暂等待后再判丢。 */
+async function applyOutboundStatus(params: {
+  providerConfigId: string
+  providerMessageId: string
+  status: MessageStatus
+  rank: number
+}): Promise<'updated' | 'exists' | 'missing'> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const rows = await db
+      .update(message)
+      .set({ status: params.status })
+      .where(
+        and(
+          eq(message.providerConfigId, params.providerConfigId),
+          eq(message.providerMessageId, params.providerMessageId),
+          eq(message.direction, 'outbound'),
+          sql`(case ${message.status}
+            when 'delivered' then 2
+            when 'bounced' then 3
+            when 'complained' then 3
+            when 'failed' then 3
+            when 'suppressed' then 3
+            else 1 end) <= ${params.rank}`,
+        ),
+      )
+      .returning({ id: message.id })
+    if (rows.length > 0) return 'updated'
+    if (
+      await outboundMessageExists(
+        params.providerConfigId,
+        params.providerMessageId,
+      )
+    ) {
+      return 'exists'
+    }
+    if (attempt < 4) await sleep(100)
+  }
+  return 'missing'
+}
+
+/**
+ * 投诉阈值处置:只统计近 7 天同一域名下的 complained 状态。
+ * 达到阈值后关闭该域名的发送开关并写审计,避免继续用被投诉的域名发信。
+ */
+async function handleComplaint(params: {
+  providerConfigId: string
+  providerMessageId: string
+}) {
+  const row = (
+    await db
+      .select({ mailboxId: message.mailboxId })
+      .from(message)
+      .where(
+        and(
+          eq(message.providerConfigId, params.providerConfigId),
+          eq(message.providerMessageId, params.providerMessageId),
+          eq(message.direction, 'outbound'),
+        ),
+      )
+      .limit(1)
+  ).at(0)
+  if (!row) return
+
+  const domainRow = (
+    await db
+      .select({ id: domain.id, hostname: domain.hostname })
+      .from(mailbox)
+      .innerJoin(domain, eq(domain.id, mailbox.domainId))
+      .where(eq(mailbox.id, row.mailboxId))
+      .limit(1)
+  ).at(0)
+  if (!domainRow) return
+
+  const cutoff = new Date(Date.now() - COMPLAINT_WINDOW_MS)
+  const countRows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(message)
+    .innerJoin(mailbox, eq(mailbox.id, message.mailboxId))
+    .where(
+      and(
+        eq(mailbox.domainId, domainRow.id),
+        eq(message.status, 'complained'),
+        gt(message.receivedAt, cutoff),
+      ),
+    )
+  const count = Number(countRows[0]?.count ?? 0)
+  if (count < COMPLAINT_DISABLE_THRESHOLD) return
+
+  const disabled = await db
+    .update(domain)
+    .set({ sendingEnabled: false, updatedAt: new Date() })
+    .where(and(eq(domain.id, domainRow.id), eq(domain.sendingEnabled, true)))
+    .returning({ id: domain.id })
+  if (disabled.length === 0) return
+
+  await db.insert(auditLog).values({
+    id: idPart(),
+    actorRole: 'system',
+    action: 'domain.complaint_disable',
+    targetType: 'domain',
+    targetId: domainRow.hostname,
+    metaJson: JSON.stringify({
+      reason: 'complaints',
+      count,
+      windowDays: 7,
+    }),
+    createdAt: new Date(),
+  })
+}
+
 /** 单个事件的处理：先抢占去重行，再落库；失败标记 failed 并抛出，让服务商重投 */
 async function handleEvent(params: {
   event: VerifiedWebhookEvent
@@ -178,25 +320,37 @@ async function handleEvent(params: {
 
     if (event.kind === 'status') {
       const rank = STATUS_RANK[event.data.status] ?? 1
-      await db
-        .update(message)
-        .set({ status: event.data.status })
-        .where(
-          and(
-            eq(message.providerConfigId, config.id),
-            eq(message.providerMessageId, event.data.providerMessageId),
-            eq(message.direction, 'outbound'),
-            sql`(case ${message.status}
-              when 'delivered' then 2
-              when 'bounced' then 3
-              when 'complained' then 3
-              when 'failed' then 3
-              when 'suppressed' then 3
-              else 1 end) <= ${rank}`,
-          ),
+      const outcome = await applyOutboundStatus({
+        providerConfigId: config.id,
+        providerMessageId: event.data.providerMessageId,
+        status: event.data.status,
+        rank,
+      })
+      if (outcome === 'missing') {
+        // 多半是团队级 Webhook 里其它应用的事件,或者本地消息还没落库。
+        // 已做过短暂重试,再返回 5xx 会让服务商持续重投;标记 ignored 并留痕。
+        logError(
+          '[webhook] status event has no local message:',
+          new Error(event.data.providerMessageId),
         )
+        await db
+          .update(webhookEvent)
+          .set({ status: 'ignored', error: 'message_not_found' })
+          .where(eq(webhookEvent.id, eventRowId))
+        return { status: 'ignored' }
+      }
+      if (event.data.status === 'complained') {
+        try {
+          await handleComplaint({
+            providerConfigId: config.id,
+            providerMessageId: event.data.providerMessageId,
+          })
+        } catch (error) {
+          logError('[webhook] complaint handling failed:', error)
+        }
+      }
       await markProcessed()
-      return { status: 'updated' }
+      return { status: outcome }
     }
 
     await db

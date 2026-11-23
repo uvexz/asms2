@@ -3,6 +3,7 @@ import '#/server/env'
 import { db } from '#/db/client'
 import { authProvider } from '#/db/schema'
 import { canSendSystemMail } from '#/server/mail/system'
+import { isLoginMethodUsable } from '#/server/auth/provider-labels'
 import { getSiteSettings } from '#/server/settings'
 
 export type SocialProviderKind = 'google' | 'github' | 'oidc'
@@ -54,7 +55,7 @@ export async function getPublicLoginConfig(): Promise<PublicLoginConfig> {
         canSend,
       },
       social: rows
-        .filter((row) => row.enabled && SOCIAL_KINDS.has(row.kind))
+        .filter((row) => isLoginMethodUsable(row) && SOCIAL_KINDS.has(row.kind))
         .map((row) => ({
           providerId: row.providerId,
           kind: row.kind as SocialProviderKind,

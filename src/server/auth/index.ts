@@ -13,6 +13,7 @@ import { eq, sql } from 'drizzle-orm'
 import { db } from '#/db/client'
 import * as schema from '#/db/schema'
 import { decryptSecret } from '#/server/crypto/secret-box'
+import { logError } from '#/server/errors'
 import { getAuthConfigVersion, getSiteSettings } from '#/server/settings'
 
 import { sendPasswordResetEmail, sendVerificationEmail } from './mailer'
@@ -190,7 +191,7 @@ async function buildAuth(): Promise<AuthInstance> {
               })
             } catch (error) {
               // 发信失败不能把账号是否存在暴露给请求方，只记录日志
-              console.error('[asms2] password reset email failed:', error)
+              logError('[asms2] password reset email failed:', error)
             }
           }
         : undefined,
@@ -217,7 +218,7 @@ async function buildAuth(): Promise<AuthInstance> {
           })
         } catch (error) {
           // 发信失败不能阻断注册；用户可以稍后在验证页重新发送
-          console.error('[asms2] verification email failed:', error)
+          logError('[asms2] verification email failed:', error)
         }
       },
     },
@@ -249,8 +250,9 @@ async function buildAuth(): Promise<AuthInstance> {
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
-      // 缓存仍能挡掉绝大多数会话查询，同时把封禁/降权的最坏延迟压到 1 分钟
-      cookieCache: { enabled: true, maxAge: 60 },
+      // 不做 cookie 级会话缓存:封禁/降权/密码重置必须立即生效。
+      // 面板服务端函数每次都走 DB 校验,不用缓存换安全窗口。
+      cookieCache: { enabled: false },
     },
     databaseHooks: {
       user: {

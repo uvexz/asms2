@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { AppError } from '#/server/errors'
+import { AppError, logError } from '#/server/errors'
 
 export const DEFAULT_MAX_JSON_CHARS = 1024 * 1024
 
@@ -11,7 +11,7 @@ export function apiErrorResponse(error: unknown): Response {
       { status: error.status },
     )
   }
-  console.error('[api/v1]', error)
+  logError('[api/v1]', error)
   return Response.json(
     {
       ok: false,
@@ -64,7 +64,7 @@ export async function parseJsonBody<T>(
   return parseSchema(schema, input)
 }
 
-async function readLimitedText(
+export async function readLimitedText(
   request: Request,
   maxChars: number,
 ): Promise<string> {
@@ -96,7 +96,8 @@ async function readLimitedText(
 
 export const createMailboxSchema = z.object({
   kind: z.enum(['permanent', 'temp']),
-  localPart: z.string().min(1).max(32),
+  // 站点前缀上限由 validateLocalPart 按配置再校验,这里只挡超长载荷
+  localPart: z.string().min(1).max(64),
   domainId: z.string().optional(),
   displayName: z.string().max(60).optional(),
 })

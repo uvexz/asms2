@@ -15,6 +15,7 @@ export interface SessionUser {
   name: string
   image?: string | null
   role?: string | null
+  banned?: boolean | null
   emailVerified?: boolean | null
   mailboxLimit?: number | null
   sendLimit?: number | null
@@ -35,11 +36,17 @@ export async function getFreshSession() {
 }
 
 export async function requireUser(): Promise<SessionUser> {
-  const session = await getSession().catch(() => null)
+  // 不走 cookieCache:封禁、降权、密码重置后要让旧 cookie 立即失效,
+  // 不能给被处置账号留下最长 60 秒的读写窗口。
+  const session = await getFreshSession().catch(() => null)
   if (!session?.user) {
     throw new AppError('unauthorized', '请先登录', 401)
   }
-  return session.user
+  const user = session.user as unknown as SessionUser
+  if (user.banned) {
+    throw new AppError('forbidden', '账号已被停用', 403)
+  }
+  return user
 }
 
 /**
@@ -50,11 +57,6 @@ export async function requireVerifiedUser(): Promise<SessionUser> {
   const user = await requireUser()
   if (await isEmailVerificationSatisfied(user.emailVerified)) return user
 
-  // cookieCache 可能还停留在验证前，拒绝之前用无缓存会话复核一次
-  const fresh = await getFreshSession().catch(() => null)
-  const freshUser = fresh?.user as unknown as SessionUser | undefined
-  if (freshUser?.emailVerified) return freshUser
-
   throw new AppError('forbidden', '请先完成邮箱验证', 403)
 }
 
@@ -64,6 +66,9 @@ export async function requireAdmin(): Promise<SessionUser> {
     throw new AppError('unauthorized', '请先登录', 401)
   }
   const user = session.user as unknown as SessionUser
+  if (user.banned) {
+    throw new AppError('forbidden', '账号已被停用', 403)
+  }
   if (user.role !== 'admin') {
     throw new AppError('forbidden', '需要管理员权限', 403)
   }

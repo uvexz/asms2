@@ -1,7 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 
 import { getPublicLoginConfig } from '#/server/auth/public-providers'
-import { getFreshSession, getSession } from '#/server/auth/guards'
+import { getFreshSession } from '#/server/auth/guards'
 import { createPowChallenge } from '#/server/auth/pow'
 import { getPublicSiteConfig, getSiteSettings } from '#/server/settings'
 
@@ -28,11 +28,10 @@ export const getPowChallengeFn = createServerFn({ method: 'POST' }).handler(
 export const getSessionFn = createServerFn({ method: 'GET' }).handler(
   async () => {
     const settings = await getSiteSettings().catch(() => null)
-    // 开启邮箱验证时不能吃 60 秒 cookieCache：验证链接点回来要立刻放行
-    const session = await (
-      settings?.emailVerificationRequired ? getFreshSession() : getSession()
-    ).catch(() => null)
+    // 不走 cookieCache:验证/封禁/降权要立刻反映到路由守卫上
+    const session = await getFreshSession().catch(() => null)
     if (!session?.user) return null
+    if ((session.user as { banned?: boolean | null }).banned) return null
     return {
       id: session.user.id,
       email: session.user.email,

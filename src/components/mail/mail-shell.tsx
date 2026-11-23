@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import {
   RiAddLine,
   RiArchiveLine,
@@ -45,14 +49,13 @@ import {
   SidebarNavButton,
 } from '#/components/shell/sidebar'
 import {
-  mailboxesQuery,
+  mailboxesInfiniteQuery,
   quotaQuery,
   remainingLabel,
   removeMailboxFromCaches,
 } from '#/lib/api'
 import { queryKeys } from '#/lib/query-keys'
 import type { MailboxView } from '#/server/mail/mailbox'
-import { MAILBOX_LIST_LIMIT } from '#/lib/limits'
 import { removeMailboxFn } from '#/server/fns/mail'
 
 import { ComposeModal } from './compose-modal'
@@ -80,6 +83,9 @@ function RailContent({
   onCompose,
   onCreate,
   onNavigate,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: {
   mailboxes: MailboxView[]
   loading: boolean
@@ -88,6 +94,9 @@ function RailContent({
   onCompose: () => void
   onCreate: () => void
   onNavigate?: () => void
+  hasMore: boolean
+  loadingMore: boolean
+  onLoadMore: () => void
 }) {
   const search = mailRoute.useSearch()
   const navigate = useNavigate({ from: '/mail' })
@@ -255,11 +264,17 @@ function RailContent({
             </div>
           ) : null}
 
-          {mailboxes.length >= MAILBOX_LIST_LIMIT ? (
-            <p className="mt-3 px-1 text-caption-1-regular text-text-tertiary">
-              仅显示最近 {MAILBOX_LIST_LIMIT}{' '}
-              个邮箱，更早的请先删除不再使用的地址。
-            </p>
+          {hasMore ? (
+            <div className="mt-3 flex justify-center">
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={onLoadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? '加载中...' : '加载更早的邮箱'}
+              </Button>
+            </div>
           ) : null}
         </div>
         <ScrollFade progress={fade.progress} />
@@ -420,7 +435,8 @@ export function MailShell({ children }: { children: ReactNode }) {
   const search = mailRoute.useSearch()
   const navigate = useNavigate({ from: '/mail' })
   const queryClient = useQueryClient()
-  const mailboxes = useQuery(mailboxesQuery)
+  const mailboxQuery = useInfiniteQuery(mailboxesInfiniteQuery())
+  const mailboxes = mailboxQuery.data?.pages.flat() ?? []
   const { site } = rootApi.useLoaderData()
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -472,15 +488,15 @@ export function MailShell({ children }: { children: ReactNode }) {
       const now = Date.now()
       if (now - last < 5_000) return
       last = now
-      void mailboxes.refetch()
+      void mailboxQuery.refetch()
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () =>
       document.removeEventListener('visibilitychange', onVisibilityChange)
-  }, [mailboxes.refetch])
+  }, [mailboxQuery.refetch])
 
   function refresh() {
-    void mailboxes.refetch()
+    void mailboxQuery.refetch()
     void queryClient.invalidateQueries({ queryKey: queryKeys.quota })
     // 只刷新列表首页，不再走 navigate 触发全量 loader 重跑
     requestMailRefresh()
@@ -517,10 +533,13 @@ export function MailShell({ children }: { children: ReactNode }) {
         }
         sidebar={(closeNav) => (
           <RailContent
-            mailboxes={mailboxes.data ?? []}
-            loading={mailboxes.isLoading}
-            error={mailboxes.isError ? mailboxes.error : null}
-            onRetry={() => void mailboxes.refetch()}
+            mailboxes={mailboxes}
+            loading={mailboxQuery.isLoading}
+            error={mailboxQuery.isError ? mailboxQuery.error : null}
+            onRetry={() => void mailboxQuery.refetch()}
+            hasMore={Boolean(mailboxQuery.hasNextPage)}
+            loadingMore={mailboxQuery.isFetchingNextPage}
+            onLoadMore={() => void mailboxQuery.fetchNextPage()}
             onCompose={() => {
               setComposeOptions({})
               setComposeOpen(true)
@@ -549,7 +568,8 @@ export function MailShell({ children }: { children: ReactNode }) {
       <ComposeModal
         isOpen={composeOpen}
         onOpenChange={setComposeOpen}
-        mailboxes={mailboxes.data ?? []}
+        mailboxes={mailboxes}
+        allowTempSend={site.allowTempSend}
         defaultFromId={composeOptions.fromMailboxId}
         defaultTo={composeOptions.to}
         defaultSubject={composeOptions.subject}

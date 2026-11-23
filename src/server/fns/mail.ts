@@ -22,13 +22,20 @@ import { getSendUsage, usageDateFor } from '#/server/mail/quota'
 import { sendMail, getOutboundRequestStatus } from '#/server/mail/send'
 import { getSiteSettings } from '#/server/settings'
 
-export const listMailboxesFn = createServerFn({ method: 'GET' }).handler(
-  async () =>
+export const listMailboxesFn = createServerFn({ method: 'GET' })
+  .validator((data: unknown) =>
+    z
+      .object({
+        offset: z.number().int().min(0).max(100_000).optional(),
+      })
+      .parse(data ?? {}),
+  )
+  .handler(async ({ data }) =>
     attempt(async () => {
       const user = await requireVerifiedUser()
-      return listMailboxes(user.id)
+      return listMailboxes(user.id, data.offset ?? 0)
     }),
-)
+  )
 
 export const createMailboxFn = createServerFn({ method: 'POST' })
   .validator((data: unknown) => createMailboxSchema.parse(data))
@@ -77,8 +84,7 @@ export const listDomainsFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) =>
     attempt(async () => {
       await requireVerifiedUser()
-      const settings = await getSiteSettings()
-      if (!settings.allowUserDomainChoice) return []
+      // 始终返回可用域名:关闭「允许用户选择」只是锁住选择,不能让弹窗拿不到默认域
       return listSelectableDomains(data.kind)
     }),
   )

@@ -11,8 +11,8 @@ x-api-key: asms_xxx
 Authorization: Bearer asms_xxx
 ```
 
-- Key 存哈希，可以设过期时间，也有限流（每个 Key 120 次/分钟，由服务端统一配置，创建时不能自定）。
-- 建 Key 时能绑一个 `metadata.mailboxId`：之后发信只能从这个邮箱出，列邮件、列邮箱都只看到它，也不能再新建邮箱。
+- Key 存哈希,也有限流(每个 Key 120 次/分钟,由服务端统一配置)。设置页只创建不限期的默认 Key;`metadata.mailboxId`、过期时间目前需通过 Better Auth API 创建时传入。
+- 绑定 `metadata.mailboxId` 后,发信只能从这个邮箱出,列邮件、列邮箱都只看到它,也不能再新建邮箱。
 - Key 过期、被吊销返回 401；用户被封禁，或站点要求验证邮箱而账号未验证，返回 403。
 
 ## 2. 发信
@@ -34,15 +34,15 @@ Authorization: Bearer asms_xxx
 }
 ```
 
-| 字段             | 必填     | 说明                                                         |
-| ---------------- | -------- | ------------------------------------------------------------ |
-| `fromMailboxId`  | ✅       | 必须是自己的长期邮箱；Key 绑定了邮箱时可省略                 |
-| `to`             | ✅       | 字符串或数组                                                 |
-| `cc` / `bcc`     | —        | 同上；`to + cc + bcc` 去重后合计最多 20 个                   |
-| `subject`        | —        | 为空时使用 `(无主题)`                                        |
-| `text` / `html`  | 至少一个 | 纯文本会按空行转段落                                         |
-| `attachments`    | —        | 最多 3 个，单封合计 ≤10MB，`content` 为合法 base64           |
-| `idempotencyKey` | —        | 同一封邮件重试时必须复用；缺省时由服务端生成并随成功结果返回 |
+| 字段             | 必填     | 说明                                                                       |
+| ---------------- | -------- | -------------------------------------------------------------------------- |
+| `fromMailboxId`  | ✅       | 必须是自己的邮箱;临时邮箱需站点开启 `allowTempSend`;Key 绑定了邮箱时可省略 |
+| `to`             | ✅       | 字符串或数组                                                               |
+| `cc` / `bcc`     | —        | 同上；`to + cc + bcc` 去重后合计最多 20 个                                 |
+| `subject`        | —        | 为空时使用 `(无主题)`                                                      |
+| `text` / `html`  | 至少一个 | 纯文本会按空行转段落                                                       |
+| `attachments`    | —        | 最多 3 个，单封合计 ≤10MB，`content` 为合法 base64                         |
+| `idempotencyKey` | —        | 同一封邮件重试时必须复用；缺省时由服务端生成并随成功结果返回               |
 
 成功：
 
@@ -112,7 +112,7 @@ Authorization: Bearer asms_xxx
 
 ## 4. 邮箱
 
-`GET /api/v1/mailboxes` → 自己的邮箱列表（含 `expiresAt`、`retained`、`unreadCount`）。
+`GET /api/v1/mailboxes?offset=0` → 自己的邮箱列表(含 `expiresAt`、`retained`、`unreadCount`);单页最多 200 条,用 `offset` 翻页。
 
 `POST /api/v1/mailboxes`
 
@@ -144,18 +144,22 @@ Authorization: Bearer asms_xxx
 }
 ```
 
-| code                    | HTTP | 场景                               |
-| ----------------------- | ---- | ---------------------------------- |
-| `unauthorized`          | 401  | 缺少/无效 API Key                  |
-| `forbidden`             | 403  | 越权、账号被封禁、临时邮箱发信     |
-| `validation_failed`     | 400  | 参数不合法（前缀过短、地址格式错） |
-| `not_found`             | 404  | 邮箱/邮件不存在或已过期            |
-| `address_taken`         | 409  | 地址被占用或仍在冷却期             |
-| `mailbox_limit_reached` | 409  | 长期邮箱达上限                     |
-| `quota_exceeded`        | 429  | 当日发件额度用尽                   |
-| `rate_limited`          | 429  | 频率限制                           |
-| `provider_error`        | 502  | 服务商调用失败                     |
-| `not_implemented`       | 501  | 服务商能力未接入                   |
+| code                    | HTTP | 场景                                 |
+| ----------------------- | ---- | ------------------------------------ |
+| `unauthorized`          | 401  | 缺少/无效 API Key                    |
+| `forbidden`             | 403  | 越权、账号被封禁、临时邮箱发信       |
+| `validation_failed`     | 400  | 参数不合法（前缀过短、地址格式错）   |
+| `not_found`             | 404  | 邮箱/邮件不存在或已过期              |
+| `address_taken`         | 409  | 地址被占用或仍在冷却期               |
+| `mailbox_limit_reached` | 409  | 长期邮箱达上限                       |
+| `quota_exceeded`        | 429  | 当日发件额度用尽                     |
+| `rate_limited`          | 429  | 频率限制                             |
+| `provider_error`        | 502  | 服务商调用失败                       |
+| `provider_retryable`    | 503  | 服务商明确未受理(429/408),可同键重试 |
+| `send_uncertain`        | 503  | 服务商可能已受理,需人工核对          |
+| `conflict`              | 409  | 幂等键已用于另一份内容               |
+| `internal`              | 500  | 未预期错误                           |
+| `not_implemented`       | 501  | 服务商能力未接入                     |
 
 ## 6. 收件 Webhook（服务商 → 本站）
 

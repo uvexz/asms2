@@ -152,6 +152,7 @@ export const unroutedMessage = sqliteTable(
         'expired',
         'domain_disabled',
         'mailbox_disabled',
+        'account_disabled',
         'provider_mismatch',
       ],
     }).notNull(),
@@ -163,7 +164,10 @@ export const unroutedMessage = sqliteTable(
   },
   (table) => [
     index('unrouted_created_idx').on(table.createdAt),
-    index('unrouted_provider_msg_idx').on(table.providerMessageId),
+    uniqueIndex('unrouted_provider_msg_idx').on(
+      table.providerConfigId,
+      table.providerMessageId,
+    ),
   ],
 )
 

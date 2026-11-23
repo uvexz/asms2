@@ -745,16 +745,18 @@ function AddProviderModal({
                 hint="AhaSend 控制台 → 设置里的账号 UUID，所有 API 路径都需要它"
               />
             ) : null}
-            {meta.needsBaseUrl ? (
-              <Input
-                label="API Base URL"
-                placeholder="https://mail.example.com"
-                value={apiBaseUrl}
-                onChange={setApiBaseUrl}
-                inputDir="ltr"
-                hint="兼容 Resend 协议的自建网关地址"
-              />
-            ) : null}
+            <Input
+              label="API Base URL"
+              placeholder="https://mail.example.com"
+              value={apiBaseUrl}
+              onChange={setApiBaseUrl}
+              inputDir="ltr"
+              hint={
+                meta.needsBaseUrl
+                  ? '必填:兼容 Resend 协议的自建网关地址'
+                  : '可选;留空使用服务商官方地址,自建/代理实例可覆盖'
+              }
+            />
             <p className="text-caption-1-regular text-text-tertiary">
               {meta.hint}
             </p>
@@ -991,6 +993,7 @@ function EditProviderModal({
   const [label, setLabel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [apiBaseUrl, setApiBaseUrl] = useState('')
+  const [accountId, setAccountId] = useState('')
   const [status, setStatus] = useState<'active' | 'invalid' | 'disabled'>(
     'active',
   )
@@ -1002,6 +1005,7 @@ function EditProviderModal({
     setLabel(provider.label)
     setApiKey('')
     setApiBaseUrl(provider.apiBaseUrl ?? '')
+    setAccountId(provider.externalAccountId ?? '')
     setStatus(
       provider.status === 'invalid' || provider.status === 'disabled'
         ? provider.status
@@ -1022,6 +1026,7 @@ function EditProviderModal({
         id: provider.id,
         label: label.trim(),
         apiBaseUrl: apiBaseUrl.trim() || null,
+        accountId: accountId.trim() || null,
         status,
         isDefaultForSend: isDefault,
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
@@ -1071,7 +1076,15 @@ function EditProviderModal({
               value={apiBaseUrl}
               onChange={setApiBaseUrl}
               inputDir="ltr"
-              hint="仅兼容 Resend 协议的自建网关需要"
+              hint="可选;留空使用服务商官方地址"
+            />
+            <Input
+              label="Account ID"
+              placeholder="AhaSend 账号 UUID;其它服务商可留空"
+              value={accountId}
+              onChange={setAccountId}
+              inputDir="ltr"
+              hint="AhaSend 必填;Plunk 可选填 projectId"
             />
             <Select
               label="状态"

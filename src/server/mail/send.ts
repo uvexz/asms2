@@ -39,6 +39,8 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_RECIPIENTS = 20
 const MAX_DISPATCH_ATTEMPTS = 5
 const QUOTA_FAILURE = 'quota_reservation_failed'
+/** 明确未受理、可安全用同一幂等键重试的服务商失败 */
+const RETRYABLE_FAILURE_PREFIX = 'retryable:'
 
 export interface SendMailInput {
   fromMailboxId: string
@@ -56,6 +58,19 @@ export interface SendMailInput {
     content?: string
     contentType?: string
   }[]
+}
+
+interface StoredAttachment {
+  filename: string
+  contentType?: string
+  contentId?: string
+  /** 新数据只存大小;旧数据可能还带 content,用于兼容读取 */
+  size?: number
+  content?: string
+}
+
+type StoredOutboundMessage = Omit<OutboundMessage, 'attachments'> & {
+  attachments?: StoredAttachment[]
 }
 
 export interface SendMailResult {
@@ -157,6 +172,18 @@ async function assertSendCooldownPassed(
  */
 export function outboundIdempotencyKey(key: string, mailboxId: string): string {
   return `user/${mailboxId}/${createHash('sha256').update(key).digest('hex').slice(0, 40)}`
+}
+
+function storableOutbound(outbound: OutboundMessage): StoredOutboundMessage {
+  return {
+    ...outbound,
+    attachments: outbound.attachments?.map((item) => ({
+      filename: item.filename,
+      contentType: item.contentType,
+      contentId: item.contentId,
+      size: Math.ceil((item.content.length * 3) / 4),
+    })),
+  }
 }
 
 function requestFingerprint(input: {
@@ -314,7 +341,7 @@ async function finalizeAcceptedRequest(
     throw uncertainError(request.id)
   }
 
-  const payload = JSON.parse(request.payloadJson) as OutboundMessage
+  const payload = JSON.parse(request.payloadJson) as StoredOutboundMessage
   const messageId = request.id
   const now = new Date()
 
@@ -355,7 +382,10 @@ async function finalizeAcceptedRequest(
         size:
           new TextEncoder().encode(payload.html ?? payload.text ?? '').length +
           storedAttachments.reduce(
-            (sum, item) => sum + Math.ceil((item.content.length * 3) / 4),
+            (sum, item) =>
+              sum +
+              (item.size ??
+                (item.content ? Math.ceil((item.content.length * 3) / 4) : 0)),
             0,
           ),
         sentAt: now,
@@ -364,7 +394,6 @@ async function finalizeAcceptedRequest(
       }),
       db.insert(messageBody).values({
         messageId,
-        htmlRaw: payload.html ?? null,
         htmlSanitized: sanitizeEmailHtml(payload.html ?? payload.text ?? ''),
         textBody: payload.text ?? null,
         headersJson: null,
@@ -376,7 +405,9 @@ async function finalizeAcceptedRequest(
           providerAttachmentId: null,
           filename: item.filename,
           contentType: item.contentType ?? 'application/octet-stream',
-          size: Math.ceil((item.content.length * 3) / 4),
+          size:
+            item.size ??
+            (item.content ? Math.ceil((item.content.length * 3) / 4) : 0),
           isInline: false,
           contentId: null,
         }),
@@ -529,7 +560,8 @@ export async function sendMail(
           userId: user.id,
           mailboxId: box.id,
           providerConfigId: resolved.config.id,
-          payloadJson: JSON.stringify(outbound),
+          // 附件正文不落库:只保留恢复本地消息所需的元数据
+          payloadJson: JSON.stringify(storableOutbound(outbound)),
           status: 'pending',
           attempts: 0,
           usageDate,
@@ -564,6 +596,29 @@ export async function sendMail(
         }
 
       case 'failed':
+        if (
+          request.error?.startsWith(RETRYABLE_FAILURE_PREFIX) &&
+          !request.providerMessageId &&
+          !request.quotaReserved
+        ) {
+          if (request.attempts >= MAX_DISPATCH_ATTEMPTS) {
+            throw new AppError(
+              'provider_error',
+              '服务商持续限流,本次发送已停止;请稍后重新创建邮件',
+              502,
+            )
+          }
+          await db
+            .update(outboundRequest)
+            .set({ status: 'pending', error: null, updatedAt: new Date() })
+            .where(
+              and(
+                eq(outboundRequest.id, request.id),
+                eq(outboundRequest.status, 'failed'),
+              ),
+            )
+          continue
+        }
         if (
           request.error === QUOTA_FAILURE &&
           !request.providerMessageId &&
@@ -639,6 +694,8 @@ export async function sendMail(
             .set({
               status: 'pending',
               error: safeError(error),
+              // 配置错误没有外呼,不应消耗派发尝试次数
+              attempts: sql`case when ${outboundRequest.attempts} > 0 then ${outboundRequest.attempts} - 1 else 0 end`,
               updatedAt: new Date(),
             })
             .where(
@@ -675,7 +732,12 @@ export async function sendMail(
         }
         const chargedRows = await db
           .update(outboundRequest)
-          .set({ quotaReserved: true, updatedAt: new Date() })
+          .set({
+            quotaReserved: true,
+            // 跨日恢复的 pending 请求要按实际扣额的日期退款
+            usageDate,
+            updatedAt: new Date(),
+          })
           .where(eq(outboundRequest.id, claimed.id))
           .returning()
         const charged = chargedRows[0] ?? claimed
@@ -694,6 +756,23 @@ export async function sendMail(
               'provider_error',
               `发送失败：${error.message}`,
               502,
+            )
+          }
+          // 429/408 表示服务商明确没有受理,可以退款并用同一幂等键重试;
+          // 超时、5xx、网络错误可能已被受理,仍进入 uncertain 禁止自动重发。
+          if (
+            error instanceof ProviderError &&
+            (error.httpStatus === 429 || error.httpStatus === 408)
+          ) {
+            await failWithRefund(
+              charged,
+              user,
+              `${RETRYABLE_FAILURE_PREFIX}${safeError(error)}`,
+            )
+            throw new AppError(
+              'provider_retryable',
+              `服务商暂时限流,请稍后用相同幂等键重试:${error.message}`,
+              503,
             )
           }
           // 超时、5xx、429、网络错误或适配器内部异常：结果未知，禁止自动重发。

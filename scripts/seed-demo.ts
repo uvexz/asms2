@@ -13,9 +13,16 @@ import { encryptSecret } from '#/server/crypto/secret-box'
 import { createMailbox, listMailboxes } from '#/server/mail/mailbox'
 
 async function main() {
-  const admins = await db.select().from(user).limit(1)
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('生产环境禁止执行 seed-demo')
+  }
+  const admins = await db
+    .select()
+    .from(user)
+    .where(eq(user.role, 'admin'))
+    .limit(1)
+  if (admins.length === 0) throw new Error('no admin user')
   const admin = admins[0]
-  if (admins.length === 0) throw new Error('no user')
 
   const configs = await db.select().from(providerConfig).limit(1)
   let config = configs[0]

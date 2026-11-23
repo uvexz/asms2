@@ -5,6 +5,7 @@ import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import { db, isLocalDatabase } from '#/db/client'
 import {
   attachment,
+  auditLog,
   dailyUsage,
   powChallenge,
   rateLimit,
@@ -19,6 +20,7 @@ import {
   verification,
   webhookEvent,
 } from '#/db/schema'
+import { logError } from '#/server/errors'
 import { getSiteSettings } from '#/server/settings'
 import { refundSendQuota } from '#/server/mail/quota'
 import {
@@ -33,6 +35,8 @@ const MESSAGE_CHUNK_SIZE = 500
 const TEMP_MAILBOX_BATCH = 100
 const DELETED_MAILBOX_BATCH = 100
 const USAGE_RETENTION_DAYS = 90
+const AUDIT_RETENTION_DAYS = 365
+const UNCERTAIN_REQUEST_RETENTION_DAYS = 90
 
 export interface SweepStats {
   expiredMailboxes: number
@@ -50,6 +54,7 @@ export interface SweepStats {
   purgedUsage: number
   purgedPowChallenges: number
   purgedRateLimits: number
+  purgedAuditLogs: number
 }
 
 /**
@@ -166,6 +171,7 @@ export async function sweep(): Promise<SweepStats> {
       await softDeleteMailbox({
         id: box.id,
         address: box.address,
+        kind: 'temp',
         deletedAt: graceCutoff,
       })
     }
@@ -234,7 +240,13 @@ export async function sweep(): Promise<SweepStats> {
   const purgedUnrouted = await deleteInChunks({
     table: unroutedMessage,
     key: unroutedMessage.id,
-    where: lt(unroutedMessage.createdAt, unroutedCutoff),
+    where: or(
+      lt(unroutedMessage.createdAt, unroutedCutoff),
+      and(
+        sql`${unroutedMessage.expiresAt} is not null`,
+        lt(unroutedMessage.expiresAt, new Date(now)),
+      ),
+    )!,
   })
 
   const eventCutoff = new Date(now - 30 * 24 * 3600 * 1000)
@@ -357,7 +369,7 @@ export async function sweep(): Promise<SweepStats> {
     if (won.length === 0) continue
     await refundSendQuota(request.userId, request.usageDate).catch(
       (error: unknown) => {
-        console.error('[sweep] refund failed:', error)
+        logError('[sweep] refund failed:', error)
       },
     )
   }
@@ -368,6 +380,24 @@ export async function sweep(): Promise<SweepStats> {
     where status in ('succeeded', 'failed')
       and updated_at < ${Math.floor(requestRetentionCutoff.getTime() / 1000)}
   `)
+
+  // uncertain 代表可能已受理,保留更久供人工对账;90 天后仍无结论则归档删除。
+  const uncertainCutoff = new Date(
+    now - UNCERTAIN_REQUEST_RETENTION_DAYS * 24 * 3600 * 1000,
+  )
+  await db.run(sql`
+    delete from outbound_request
+    where status = 'uncertain'
+      and updated_at < ${Math.floor(uncertainCutoff.getTime() / 1000)}
+  `)
+
+  const auditCutoff = new Date(now - AUDIT_RETENTION_DAYS * 24 * 3600 * 1000)
+  const purgedAuditLogs = await deleteInChunks({
+    table: auditLog,
+    key: auditLog.id,
+    where: lt(auditLog.createdAt, auditCutoff),
+    chunk: 1_000,
+  })
 
   await optimizePlanner()
   await sweepMailboxQuota()
@@ -388,5 +418,6 @@ export async function sweep(): Promise<SweepStats> {
     purgedUsage,
     purgedPowChallenges,
     purgedRateLimits,
+    purgedAuditLogs,
   }
 }

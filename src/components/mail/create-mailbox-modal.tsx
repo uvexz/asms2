@@ -25,6 +25,11 @@ import { randomNameLocalPart } from '#/lib/name-prefix'
 
 const rootApi = getRouteApi('__root__')
 
+function ttlLabel(minutes: number): string {
+  if (minutes % 60 === 0) return `${minutes / 60} 小时`
+  return `${minutes} 分钟`
+}
+
 export function CreateMailboxModal({
   isOpen,
   onOpenChange,
@@ -39,6 +44,7 @@ export function CreateMailboxModal({
   const [domainId, setDomainId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  const allowDomainChoice = site.allowUserDomainChoice
   const tempPrefixMin = Math.max(site.tempPrefixMin, 8)
   const permanentPrefixMin = site.permanentPrefixMin
   const prefixMax = site.prefixMax
@@ -47,14 +53,22 @@ export function CreateMailboxModal({
 
   useEffect(() => {
     if (!isOpen) return
-    setPrefix(
-      kind === 'temp'
-        ? randomNameLocalPart({
-            minLength: tempPrefixMin,
-            maxLength: prefixMax,
-          })
-        : '',
-    )
+    if (kind === 'permanent') {
+      setPrefix('')
+      setDomainId(null)
+      return
+    }
+    try {
+      setPrefix(
+        randomNameLocalPart({
+          minLength: tempPrefixMin,
+          maxLength: prefixMax,
+        }),
+      )
+    } catch {
+      // 存量站点可能配置了 prefixMax < 8;不要让它把弹窗打崩
+      setPrefix('')
+    }
     setDomainId(null)
   }, [kind, isOpen, tempPrefixMin, prefixMax])
 
@@ -104,7 +118,7 @@ export function CreateMailboxModal({
             title="新建邮箱"
             description={
               kind === 'temp'
-                ? '创建后 1 小时内收到任意一封邮件，该邮箱永久保留；1 小时无收件则自动失效。数量不限。'
+                ? `创建后 ${ttlLabel(site.tempTtlMinutes)}内收到任意一封邮件,该邮箱永久保留;${ttlLabel(site.tempTtlMinutes)}无收件则自动失效。数量不限。`
                 : '长期邮箱可用于收发邮件，数量受管理员配额限制。'
             }
             icon={RiAddLine}
@@ -168,7 +182,9 @@ export function CreateMailboxModal({
               placeholder="选择域名"
               selectedKey={selectedDomain?.id ?? null}
               onSelectionChange={(key) => setDomainId(String(key))}
-              isDisabled={!domains.data || domains.data.length === 0}
+              isDisabled={
+                !allowDomainChoice || !domains.data || domains.data.length === 0
+              }
             >
               {(domains.data ?? []).map((item) => (
                 <SelectItem

@@ -3,7 +3,7 @@ import { customAlphabet } from 'nanoid'
 
 import { db } from '#/db/client'
 import { mailbox, mailboxQuota } from '#/db/schema'
-import { AppError } from '#/server/errors'
+import { AppError, isUniqueConstraintError } from '#/server/errors'
 
 export type MailboxQuotaKind = 'permanent' | 'temp'
 
@@ -16,7 +16,7 @@ export function quotaHourBucket(now = Date.now()): string {
 }
 
 export function isAddressConflict(error: unknown): boolean {
-  return error instanceof Error && /unique|constraint/i.test(error.message)
+  return isUniqueConstraintError(error)
 }
 
 /**
@@ -75,11 +75,12 @@ export function releaseMailboxQuota(mailboxId: string) {
 export async function softDeleteMailbox(params: {
   id: string
   address: string
+  kind: MailboxQuotaKind
   deletedAt?: Date
   now?: Date
 }): Promise<void> {
   const now = params.now ?? new Date()
-  await db.batch([
+  const statements = [
     db
       .update(mailbox)
       .set({
@@ -90,8 +91,11 @@ export async function softDeleteMailbox(params: {
         updatedAt: now,
       })
       .where(and(eq(mailbox.id, params.id), ne(mailbox.status, 'deleted'))),
-    releaseMailboxQuota(params.id),
-  ])
+    // 临时邮箱的 quota 行同时承担「每小时创建次数」计数,删除时不能归还,
+    // 否则可以创建 20 个、删掉再继续创建。等小时桶过期后由 sweep 清理。
+    ...(params.kind === 'permanent' ? [releaseMailboxQuota(params.id)] : []),
+  ]
+  await db.batch(statements as never)
 }
 
 /** 只清理不再关联有效邮箱的历史配额和过期临时桶。 */
@@ -99,7 +103,8 @@ export async function sweepMailboxQuota(): Promise<void> {
   await db.batch([
     db.run(sql`
       delete from mailbox_quota
-      where not exists (select 1 from mailbox where mailbox.id = mailbox_quota.mailbox_id)
+      where kind = 'permanent'
+        and not exists (select 1 from mailbox where mailbox.id = mailbox_quota.mailbox_id)
         and sent_at < ${Math.floor((Date.now() - 10 * 60_000) / 1000)}
     `),
     db.run(sql`

@@ -44,7 +44,7 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
   const navigate = useNavigate({ from: '/mail' })
   const queryClient = useQueryClient()
   const scrollRef = useRef<HTMLDivElement>(null)
-  const fade = useScrollFade()
+  const { progress, onScroll, reset } = useScrollFade()
   const lastRefreshRef = useRef(0)
 
   const filters = useMemo(
@@ -111,8 +111,8 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
   // 切换筛选条件后回到顶部，避免停留在上一个列表的滚动位置
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
-    fade.reset()
-  }, [filters.folder, filters.mailboxId, filters.q, fade])
+    reset()
+  }, [filters.folder, filters.mailboxId, filters.q, reset])
 
   const items = useMemo(() => {
     const seen = new Set<string>()
@@ -181,7 +181,7 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
       <div className="relative min-h-0 flex-1">
         <div
           ref={scrollRef}
-          onScroll={fade.onScroll}
+          onScroll={onScroll}
           className="h-full overflow-y-auto"
         >
           {query.isError ? (
@@ -322,7 +322,7 @@ export function MessageList({ selectedId }: { selectedId?: string }) {
             </div>
           ) : null}
         </div>
-        <ScrollFade progress={fade.progress} />
+        <ScrollFade progress={progress} />
       </div>
     </section>
   )

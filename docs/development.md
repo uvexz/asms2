@@ -55,7 +55,7 @@ src/routes / src/components → server/fns → server/{mail,webhooks,jobs} → p
 
 | 文件           | 主要函数                                                                                                                                                  |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fns/site.ts`  | `getPublicSiteFn`、`getPublicAuthProvidersFn`、`getSessionFn`                                                                                             |
+| `fns/site.ts`  | `getPublicSiteFn`、`getPublicLoginConfigFn`、`getSessionFn`                                                                                               |
 | `fns/mail.ts`  | `listMailboxesFn`、`createMailboxFn`、`removeMailboxFn`、`listDomainsFn`、`listMessagesFn`、`getMessageFn`、`updateMessageFn`、`sendMailFn`、`getQuotaFn` |
 | `fns/admin.ts` | `adminOverviewFn`、站点读写、域名 CRUD/验证、服务商 CRUD、Webhook CRUD、登录配置、用户管理、审计/事件/墓碑查询                                            |
 

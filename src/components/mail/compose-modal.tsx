@@ -24,6 +24,7 @@ export function ComposeModal({
   isOpen,
   onOpenChange,
   mailboxes,
+  allowTempSend,
   defaultFromId,
   defaultTo,
   defaultSubject,
@@ -31,6 +32,7 @@ export function ComposeModal({
   isOpen: boolean
   onOpenChange: (open: boolean) => void
   mailboxes: MailboxView[]
+  allowTempSend: boolean
   defaultFromId?: string
   defaultTo?: string
   defaultSubject?: string
@@ -41,9 +43,11 @@ export function ComposeModal({
   const sendable = useMemo(
     () =>
       mailboxes.filter(
-        (item) => item.kind === 'permanent' && item.status === 'active',
+        (item) =>
+          item.status === 'active' &&
+          (item.kind === 'permanent' || allowTempSend),
       ),
-    [mailboxes],
+    [mailboxes, allowTempSend],
   )
 
   const [fromId, setFromId] = useState<string | null>(null)
@@ -104,7 +108,10 @@ export function ComposeModal({
       if (!result.ok) {
         toast.error(result.error.message)
         // 结果未知时保留原幂等键；明确失败后才换新键，避免重复邮件。
-        if (result.error.code !== 'send_uncertain') {
+        if (
+          result.error.code !== 'send_uncertain' &&
+          result.error.code !== 'provider_retryable'
+        ) {
           setDraftKey(crypto.randomUUID())
         }
         return

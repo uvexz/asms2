@@ -31,7 +31,10 @@ const {
   user,
 } = await import('#/db/schema')
 const { encryptSecret } = await import('#/server/crypto/secret-box')
-const { createMailbox } = await import('#/server/mail/mailbox')
+const { createMailbox, listMailboxes, removeMailbox } =
+  await import('#/server/mail/mailbox')
+const { getSiteSettings } = await import('#/server/settings')
+const { formatAddress } = await import('#/lib/email-address')
 const { getProvider, ProviderError } = await import('#/server/providers')
 const { sendMail } = await import('#/server/mail/send')
 const { sweep } = await import('#/server/jobs/sweep')
@@ -114,6 +117,95 @@ assert.equal(
 )
 console.log('PASS temporary mailbox hour limit')
 
+// 删除 temp 不能归还小时配额,否则可以 20 个 → 删 1 个 → 第 21 个继续创建。
+const tempBoxes = tempResults.flatMap((result) =>
+  result.status === 'fulfilled' ? [result.value] : [],
+)
+await removeMailbox('temp-user', tempBoxes[0].id)
+await assert.rejects(
+  createMailbox('temp-user', {
+    kind: 'temp',
+    localPart: 'temporaryextra',
+  }),
+  (error: unknown) => (error as { code?: string }).code === 'rate_limited',
+)
+console.log('PASS deleting a temp mailbox does not reset hourly creation limit')
+
+// 重复地址必须映射成 409,而不是被 Drizzle 包装后的 500。
+await createMailbox('send-user', {
+  kind: 'permanent',
+  localPart: 'dupcase',
+})
+await assert.rejects(
+  createMailbox('send-user', {
+    kind: 'permanent',
+    localPart: 'dupcase',
+  }),
+  (error: unknown) => (error as { code?: string }).code === 'address_taken',
+)
+console.log('PASS duplicate address maps to address_taken')
+
+// 冷却期为 0 时,软删后的地址应该可以立即重新注册。
+await db
+  .update(siteSettings)
+  .set({ tempCooldownHours: 0 })
+  .where(eq(siteSettings.id, 'default'))
+await getSiteSettings(true)
+const reusable = await createMailbox('limit-user', {
+  kind: 'temp',
+  localPart: 'reusecase',
+})
+await removeMailbox('limit-user', reusable.id)
+const reused = await createMailbox('limit-user', {
+  kind: 'temp',
+  localPart: 'reusecase',
+})
+assert.equal(reused.address, reusable.address)
+console.log('PASS soft-deleted address can be reused after cooldown')
+
+// 显示名不能把 CR/LF 或收件人分隔符带进 From 头。
+const formatted = formatAddress({
+  address: 'a@example.com',
+  name: 'x\r\nBcc: victim@example.com, y',
+})
+assert.equal(formatted.includes('\r'), false)
+assert.equal(formatted.includes('\n'), false)
+assert.equal(formatted.includes(','), false)
+console.log('PASS display name is sanitized before formatting From header')
+
+// 邮箱列表支持 offset,侧栏分页可以继续取后面的邮箱。
+const paged = await listMailboxes('limit-user', 50)
+assert.equal(paged.length, 0)
+console.log('PASS mailbox list supports offset pagination')
+
+// 关闭域名选择时,服务端忽略客户端传来的 domainId,强制默认域。
+await db.insert(domain).values({
+  id: 'second-domain',
+  hostname: 'second.example.com',
+  providerConfigId: providerId,
+  status: 'verified',
+  receivingEnabled: true,
+  sendingEnabled: true,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+})
+await db
+  .update(domain)
+  .set({ isDefaultTemp: true })
+  .where(eq(domain.id, domainId))
+await db
+  .update(siteSettings)
+  .set({ allowUserDomainChoice: false })
+  .where(eq(siteSettings.id, 'default'))
+await getSiteSettings(true)
+const forced = await createMailbox('send-user', {
+  kind: 'temp',
+  localPart: 'forceddefault',
+  domainId: 'second-domain',
+})
+assert.equal(forced.address.endsWith('@regression.test'), true)
+console.log('PASS disabled domain choice forces the default domain')
+
 const sendMailbox = await createMailbox('send-user', {
   kind: 'permanent',
   localPart: 'outboundreg',
@@ -129,7 +221,7 @@ const actor = {
 const provider = getProvider('resend')
 const originalSend = provider.send
 let providerCalls = 0
-let mode: 'ok' | 'reject' | 'unknown' = 'ok'
+let mode: 'ok' | 'reject' | 'unknown' | 'rate-limit' = 'ok'
 provider.send = async () => {
   providerCalls += 1
   if (mode === 'reject') {
@@ -138,7 +230,16 @@ provider.send = async () => {
   if (mode === 'unknown') {
     throw new ProviderError('stub timeout', { retryable: true })
   }
-  return { providerMessageId: 'stub-provider-message', status: 'sent' }
+  if (mode === 'rate-limit') {
+    throw new ProviderError('stub 429', {
+      retryable: true,
+      httpStatus: 429,
+    })
+  }
+  return {
+    providerMessageId: `stub-provider-message-${providerCalls}`,
+    status: 'sent',
+  }
 }
 
 const input = {
@@ -209,6 +310,22 @@ await assert.rejects(
 )
 assert.equal(providerCalls, 2)
 console.log('PASS unknown result does not automatically resend')
+
+// 429 明确未受理:同键重试应重新派发,而不是永久卡在 uncertain。
+mode = 'rate-limit'
+const retryKey = 'regression-rate-limit-1'
+await assert.rejects(
+  sendMail(actor, { ...input, idempotencyKey: retryKey }),
+  (error: unknown) =>
+    (error as { code?: string }).code === 'provider_retryable',
+)
+assert.equal(providerCalls, 3)
+mode = 'ok'
+const retried = await sendMail(actor, { ...input, idempotencyKey: retryKey })
+assert.ok(retried.providerMessageId)
+assert.equal(providerCalls, 4)
+assert.equal((await db.select().from(dailyUsage))[0]?.sentCount, 2)
+console.log('PASS 429 can be retried with the same idempotency key')
 
 // Telegram：第一次发送回复失败应可重投，第二次成功后才标记 processed。
 await db.insert(telegramBot).values({

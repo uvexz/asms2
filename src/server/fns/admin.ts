@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { desc, eq, inArray, ne, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm'
 import { customAlphabet } from 'nanoid'
 import { z } from 'zod'
 
@@ -21,7 +21,11 @@ import {
   webhookEvent,
 } from '#/db/schema'
 import { clientIp, requireAdmin, userAgent } from '#/server/auth/guards'
-import { accountKind, accountLabel } from '#/server/auth/provider-labels'
+import {
+  accountKind,
+  accountLabel,
+  isLoginMethodUsable,
+} from '#/server/auth/provider-labels'
 import type { LoginAccountKind } from '#/server/auth/provider-labels'
 import { invalidateAuthCache } from '#/server/auth'
 import { invalidatePublicLoginConfig } from '#/server/auth/public-providers'
@@ -117,9 +121,10 @@ const settingsPatchSchema = z.object({
   newAccountSendCooldownHours: z.number().int().min(0).max(720).optional(),
   defaultMailboxLimit: z.number().int().min(0).max(100).optional(),
   defaultDailySendLimit: z.number().int().min(0).max(1000).optional(),
-  permanentPrefixMin: z.number().int().min(1).max(32).optional(),
-  tempPrefixMin: z.number().int().min(4).max(32).optional(),
-  prefixMax: z.number().int().min(4).max(64).optional(),
+  // 与文档保持一致:长期至少 3 位、临时至少 8 位;随机生成器也要求 max >= 8
+  permanentPrefixMin: z.number().int().min(3).max(32).optional(),
+  tempPrefixMin: z.number().int().min(8).max(32).optional(),
+  prefixMax: z.number().int().min(8).max(32).optional(),
   tempTtlMinutes: z.number().int().min(5).max(10080).optional(),
   tempGraceMinutes: z.number().int().min(0).max(10080).optional(),
   tempCooldownHours: z.number().int().min(0).max(720).optional(),
@@ -145,7 +150,14 @@ export const adminUpdateSettingsFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) =>
     attempt(async () => {
       const actor = await requireAdmin()
-      await getSiteSettings()
+      const current = await getSiteSettings()
+      const next = { ...current, ...data }
+      if (
+        next.permanentPrefixMin > next.prefixMax ||
+        next.tempPrefixMin > next.prefixMax
+      ) {
+        throw new AppError('validation_failed', '前缀最短长度不能大于最长长度')
+      }
       await db
         .update(siteSettings)
         .set({ ...data, updatedAt: new Date(), updatedBy: actor.id })
@@ -307,10 +319,14 @@ export const adminUpdateDomainFn = createServerFn({ method: 'POST' })
     attempt(async () => {
       const actor = await requireAdmin()
       const { id, ...patch } = data
-      await db
+      const updated = await db
         .update(domain)
         .set({ ...patch, updatedAt: new Date() })
         .where(eq(domain.id, id))
+        .returning({ id: domain.id })
+      if (updated.length === 0) {
+        throw new AppError('not_found', '域名不存在', 404)
+      }
       await audit(actor.id, 'domain.update', 'domain', id, patch)
       return { id }
     }),
@@ -529,12 +545,8 @@ export const adminCreateProviderFn = createServerFn({ method: 'POST' })
       if (!data.apiKey)
         throw new AppError('validation_failed', '请填写 API Key')
 
-      if (data.isDefaultForSend) {
-        await db.update(providerConfig).set({ isDefaultForSend: false })
-      }
-
       const id = idPart()
-      await db.insert(providerConfig).values({
+      const insertProvider = db.insert(providerConfig).values({
         id,
         kind: data.kind,
         label: data.label,
@@ -549,6 +561,15 @@ export const adminCreateProviderFn = createServerFn({ method: 'POST' })
         updatedAt: new Date(),
         createdBy: actor.id,
       })
+      if (data.isDefaultForSend) {
+        // 清默认 + 插入必须同批,否则插入失败会把现有默认服务商清空。
+        await db.batch([
+          db.update(providerConfig).set({ isDefaultForSend: false }),
+          insertProvider,
+        ] as never)
+      } else {
+        await insertProvider
+      }
       await audit(actor.id, 'provider.create', 'provider', id, {
         kind: data.kind,
         label: data.label,
@@ -600,10 +621,7 @@ export const adminUpdateProviderFn = createServerFn({ method: 'POST' })
         )
       }
 
-      if (rest.isDefaultForSend) {
-        await db.update(providerConfig).set({ isDefaultForSend: false })
-      }
-      await db
+      const updateProvider = db
         .update(providerConfig)
         .set({
           ...rest,
@@ -617,6 +635,14 @@ export const adminUpdateProviderFn = createServerFn({ method: 'POST' })
           updatedAt: new Date(),
         })
         .where(eq(providerConfig.id, id))
+      if (rest.isDefaultForSend) {
+        await db.batch([
+          db.update(providerConfig).set({ isDefaultForSend: false }),
+          updateProvider,
+        ] as never)
+      } else {
+        await updateProvider
+      }
       await audit(actor.id, 'provider.update', 'provider', id, {
         apiBaseUrlChanged: apiBaseUrl !== undefined,
         apiKeyChanged: Boolean(apiKey),
@@ -693,6 +719,14 @@ export const adminCreateWebhookFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) =>
     attempt(async () => {
       const actor = await requireAdmin()
+      const resolved = await getProviderById(data.providerConfigId)
+      if (!resolved.provider.capabilities.webhook) {
+        throw new AppError(
+          'not_implemented',
+          `${resolved.config.label} 尚未支持 Webhook`,
+          501,
+        )
+      }
       const id = idPart()
       await db.insert(webhookEndpoint).values({
         id,
@@ -731,10 +765,14 @@ export const adminUpdateWebhookFn = createServerFn({ method: 'POST' })
       if (rest.enabled !== undefined) values.enabled = rest.enabled
       if (signingSecret) values.signingSecretEnc = encryptSecret(signingSecret)
       if (Object.keys(values).length === 0) return { id }
-      await db
+      const updated = await db
         .update(webhookEndpoint)
         .set(values)
         .where(eq(webhookEndpoint.id, id))
+        .returning({ id: webhookEndpoint.id })
+      if (updated.length === 0) {
+        throw new AppError('not_found', 'Webhook 端点不存在', 404)
+      }
       await audit(actor.id, 'webhook.update', 'webhook', id, {
         enabled: rest.enabled,
       })
@@ -812,12 +850,9 @@ function normalizeOidcProviderId(raw: string | undefined): string {
   return value
 }
 
-async function countEnabledMethods() {
-  const rows = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(authProvider)
-    .where(eq(authProvider.enabled, true))
-  return Number(rows[0]?.count ?? 0)
+async function countUsableLoginMethods() {
+  const rows = await db.select().from(authProvider)
+  return rows.filter(isLoginMethodUsable).length
 }
 
 async function invalidateLoginMethodCaches() {
@@ -957,15 +992,41 @@ export const adminUpdateLoginMethodFn = createServerFn({ method: 'POST' })
       ).at(0)
       if (!row) throw new AppError('not_found', '登录方式不存在', 404)
 
-      if (data.enabled === false && row.enabled) {
-        const enabled = await countEnabledMethods()
-        if (enabled <= 1) {
-          throw new AppError('conflict', '至少保留一种登录方式', 409)
+      const kind = row.kind as LoginMethodKind
+      const oauth = isOAuthMethod(kind)
+      const nextEnabled = data.enabled ?? row.enabled
+      const nextClientId =
+        data.clientId !== undefined
+          ? data.clientId?.trim() || null
+          : row.clientId
+      const nextIssuer =
+        data.issuer !== undefined ? data.issuer?.trim() || null : row.issuer
+      const nextHasSecret = Boolean(
+        data.clientSecret?.trim() || row.clientSecretEnc,
+      )
+
+      if (oauth && nextEnabled) {
+        if (
+          !nextClientId ||
+          !nextHasSecret ||
+          (kind === 'oidc' && !nextIssuer)
+        ) {
+          throw new AppError(
+            'validation_failed',
+            '启用该登录方式前请填写完整的 Client ID / Secret 与 Issuer',
+          )
         }
       }
 
-      const kind = row.kind as LoginMethodKind
-      const oauth = isOAuthMethod(kind)
+      if (
+        data.enabled === false &&
+        row.enabled &&
+        isLoginMethodUsable(row) &&
+        (await countUsableLoginMethods()) <= 1
+      ) {
+        throw new AppError('conflict', '至少保留一种可用的登录方式', 409)
+      }
+
       const { id, clientSecret, ...rest } = data
       await db
         .update(authProvider)
@@ -1007,11 +1068,12 @@ export const adminDeleteLoginMethodFn = createServerFn({ method: 'POST' })
       ).at(0)
       if (!row) throw new AppError('not_found', '登录方式不存在', 404)
 
-      if (row.enabled) {
-        const enabled = await countEnabledMethods()
-        if (enabled <= 1) {
-          throw new AppError('conflict', '至少保留一种登录方式', 409)
-        }
+      if (
+        row.enabled &&
+        isLoginMethodUsable(row) &&
+        (await countUsableLoginMethods()) <= 1
+      ) {
+        throw new AppError('conflict', '至少保留一种可用的登录方式', 409)
       }
 
       await db.delete(authProvider).where(eq(authProvider.id, data.id))
@@ -1197,6 +1259,9 @@ export const adminUpdateUserFn = createServerFn({ method: 'POST' })
       if (data.id === actor.id && data.role === 'user') {
         throw new AppError('validation_failed', '不能降级自己')
       }
+      if (data.id === actor.id && data.banned === true) {
+        throw new AppError('validation_failed', '不能封禁自己')
+      }
 
       const current = (
         await db
@@ -1206,6 +1271,26 @@ export const adminUpdateUserFn = createServerFn({ method: 'POST' })
           .limit(1)
       )[0] as { role: string | null; banned: boolean | null } | undefined
       if (!current) throw new AppError('not_found', '用户不存在', 404)
+
+      const removesActiveAdmin =
+        current.role === 'admin' &&
+        !current.banned &&
+        (data.role === 'user' || data.banned === true)
+      if (removesActiveAdmin) {
+        const admins = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(user)
+          .where(
+            and(eq(user.role, 'admin'), sql`coalesce(${user.banned}, 0) = 0`),
+          )
+        if (Number(admins[0]?.count ?? 0) <= 1) {
+          throw new AppError(
+            'conflict',
+            '至少保留一个未封禁的管理员,不能封禁或降级最后一个管理员',
+            409,
+          )
+        }
+      }
 
       const { id, ...patch } = data
       await db
