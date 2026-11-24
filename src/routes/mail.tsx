@@ -2,7 +2,11 @@ import { Outlet, createFileRoute, redirect } from '@tanstack/react-router'
 
 import { MailShell } from '#/components/mail/mail-shell'
 import { RouteErrorState } from '#/components/application/errors/error-state'
-import { mailboxesQuery, messagesInfiniteQuery, quotaQuery } from '#/lib/api'
+import {
+  mailboxesInfiniteQuery,
+  messagesInfiniteQuery,
+  quotaQuery,
+} from '#/lib/api'
 import type { MailFolder } from '#/lib/query-keys'
 
 const FOLDERS = ['inbox', 'sent', 'spam', 'trash', 'archive'] as const
@@ -46,9 +50,13 @@ export const Route = createFileRoute('/mail')({
       mailboxId: deps.mailboxId,
       q: deps.q,
     })
+    const mailboxes = mailboxesInfiniteQuery()
 
     await Promise.all([
-      context.queryClient.query(mailboxesQuery),
+      // 首屏直接预取无限查询，SSR 带出完整邮箱侧栏，避免客户端水合后再次 RPC
+      context.queryClient.getQueryData(mailboxes.queryKey)
+        ? Promise.resolve()
+        : context.queryClient.infiniteQuery(mailboxes),
       context.queryClient.query(quotaQuery),
       // 无限查询的 refetch 会把已加载的每一页串行重取一遍，放在导航关键路径上
       // 就是"再次进入看过的文件夹 = N 次 RPC + 白屏"。有缓存就先渲染，

@@ -39,6 +39,18 @@ const config = defineConfig({
       compressPublicAssets: { gzip: true, brotli: true },
       plugins: ['./src/server/plugins/request-timing.ts'],
       routeRules: {
+        // 构建产物带有内容 hash，支持永久不可变强缓存
+        '/assets/**': {
+          headers: { 'cache-control': 'public, max-age=31536000, immutable' },
+        },
+        // 静态站点图标缓存 1 天
+        '/favicon*': { headers: { 'cache-control': 'public, max-age=86400' } },
+        '/android-chrome*': {
+          headers: { 'cache-control': 'public, max-age=86400' },
+        },
+        '/apple-touch-icon.png': {
+          headers: { 'cache-control': 'public, max-age=86400' },
+        },
         // 个性化页面绝不进共享缓存；前面加 CDN 时也不会误缓存别人的邮箱
         '/mail/**': { headers: { 'cache-control': 'private, no-store' } },
         '/admin/**': { headers: { 'cache-control': 'private, no-store' } },

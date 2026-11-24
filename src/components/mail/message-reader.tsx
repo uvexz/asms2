@@ -31,6 +31,7 @@ import {
   setMailboxUnread,
   unwrap,
 } from '#/lib/api'
+import { queryKeys } from '#/lib/query-keys'
 import { updateMessageFn } from '#/server/fns/mail'
 import type { MailboxView } from '#/server/mail/mailbox'
 import { ErrorState } from '#/components/application/errors/error-state'
@@ -181,6 +182,13 @@ export function MessageReader({
       if (action === 'trash') {
         await runUpdateAsync({ id: message.id, folder: 'trash' })
         removeMessageFromCaches(queryClient, message.id)
+        // 使回收站列表失效，确保切到回收站时能看到新移入的邮件
+        void queryClient.invalidateQueries({
+          predicate: (q) =>
+            q.queryKey[0] === queryKeys.messages.all[0] &&
+            (q.queryKey[1] as { folder?: string } | undefined)?.folder ===
+              'trash',
+        })
         toast.success('已移入回收站')
         void navigate({ to: '/mail', search: (prev) => ({ ...prev }) })
         return
@@ -195,6 +203,13 @@ export function MessageReader({
       if (action === 'archive' || action === 'spam' || action === 'inbox') {
         await runUpdateAsync({ id: message.id, folder: action })
         removeMessageFromCaches(queryClient, message.id)
+        // 使目标文件夹失效，避免缓存期内进入目标文件夹出现假性丢信
+        void queryClient.invalidateQueries({
+          predicate: (q) =>
+            q.queryKey[0] === queryKeys.messages.all[0] &&
+            (q.queryKey[1] as { folder?: string } | undefined)?.folder ===
+              action,
+        })
         toast.success(
           action === 'archive'
             ? '已移入归档'

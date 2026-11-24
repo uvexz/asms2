@@ -34,8 +34,8 @@ export function unwrap<T>(result: Result<T>): T {
 export const sessionQuery = queryOptions({
   queryKey: queryKeys.session,
   queryFn: () => getSessionFn(),
-  // 路由守卫每次导航都拿最新会话,封禁/降权立即生效
-  staleTime: 0,
+  // 30s 缓存拦截 Link hover 意图预取与高频切页 RPC；登出、修改密码、降权时由前端主动 invalidate 驱动刷新
+  staleTime: 30_000,
 })
 
 /** 登录方式配置只给登录/注册/设置页用，不再塞进根 loader */
@@ -228,6 +228,7 @@ export function setMailboxUnread(
   mailboxId: string,
   unreadCount: number,
 ) {
+  // 1. 同步更新普通列表缓存
   client.setQueryData<MailboxView[]>(queryKeys.mailboxes, (old) =>
     old
       ? old.map((item) =>
@@ -235,13 +236,46 @@ export function setMailboxUnread(
         )
       : old,
   )
+
+  // 2. 同步更新侧栏使用的无限分页缓存，使侧栏未读徽标与总未读即时刷新
+  client.setQueryData<InfiniteData<MailboxView[]>>(
+    [...queryKeys.mailboxes, 'pages'],
+    (old) => {
+      if (!old) return old
+      return {
+        ...old,
+        pages: old.pages.map((page) =>
+          page.map((item) =>
+            item.id === mailboxId ? { ...item, unreadCount } : item,
+          ),
+        ),
+      }
+    },
+  )
 }
 
-/** 删除邮箱后把它的邮件从所有列表/详情缓存里摘掉 */
+/** 删除邮箱后把它的邮件从所有列表/详情缓存里摘掉，并清理邮箱缓存 */
 export function removeMailboxFromCaches(
   client: QueryClient,
   mailboxId: string,
 ) {
+  // 从普通列表与侧栏无限列表摘除该邮箱
+  client.setQueryData<MailboxView[]>(queryKeys.mailboxes, (old) =>
+    old ? old.filter((item) => item.id !== mailboxId) : old,
+  )
+  client.setQueryData<InfiniteData<MailboxView[]>>(
+    [...queryKeys.mailboxes, 'pages'],
+    (old) =>
+      old
+        ? {
+            ...old,
+            pages: old.pages.map((page) =>
+              page.filter((item) => item.id !== mailboxId),
+            ),
+          }
+        : old,
+  )
+
   client.setQueriesData<InfiniteData<MessagePage>>(
     { queryKey: queryKeys.messages.all },
     (old) =>
