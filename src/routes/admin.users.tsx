@@ -68,6 +68,7 @@ function AdminUsers() {
           data: { q: search || undefined, limit: PAGE_SIZE, offset },
         }),
       ),
+    staleTime: 5_000,
   })
 
   async function refresh() {

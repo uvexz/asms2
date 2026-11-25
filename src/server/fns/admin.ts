@@ -255,6 +255,7 @@ export const adminCreateDomainFn = createServerFn({ method: 'POST' })
         updatedAt: new Date(),
       })
 
+      invalidatePublicLoginConfig()
       await audit(actor.id, 'domain.create', 'domain', hostname)
       return { hostname }
     }),
@@ -299,6 +300,7 @@ export const adminVerifyDomainFn = createServerFn({ method: 'POST' })
         })
         .where(eq(domain.id, row.id))
 
+      invalidatePublicLoginConfig()
       await audit(actor.id, 'domain.verify', 'domain', row.hostname)
       return { status: status?.status ?? 'pending' }
     }),
@@ -333,6 +335,7 @@ export const adminUpdateDomainFn = createServerFn({ method: 'POST' })
       if (updated.length === 0) {
         throw new AppError('not_found', '域名不存在', 404)
       }
+      invalidatePublicLoginConfig()
       await audit(actor.id, 'domain.update', 'domain', id, patch)
       return { id }
     }),
@@ -351,6 +354,7 @@ export const adminDeleteDomainFn = createServerFn({ method: 'POST' })
         throw new AppError('conflict', '该域名下仍有邮箱，不能删除', 409)
       }
       await db.delete(domain).where(eq(domain.id, data.id))
+      invalidatePublicLoginConfig()
       await audit(actor.id, 'domain.delete', 'domain', data.id)
       return { id: data.id }
     }),
@@ -488,6 +492,7 @@ export const adminImportProviderDomainsFn = createServerFn({ method: 'POST' })
         })),
       )
 
+      invalidatePublicLoginConfig()
       await audit(
         actor.id,
         'domain.import',
@@ -576,6 +581,7 @@ export const adminCreateProviderFn = createServerFn({ method: 'POST' })
       } else {
         await insertProvider
       }
+      invalidatePublicLoginConfig()
       await audit(actor.id, 'provider.create', 'provider', id, {
         kind: data.kind,
         label: data.label,
@@ -649,6 +655,7 @@ export const adminUpdateProviderFn = createServerFn({ method: 'POST' })
       } else {
         await updateProvider
       }
+      invalidatePublicLoginConfig()
       await audit(actor.id, 'provider.update', 'provider', id, {
         apiBaseUrlChanged: apiBaseUrl !== undefined,
         apiKeyChanged: Boolean(apiKey),
@@ -676,6 +683,7 @@ export const adminDeleteProviderFn = createServerFn({ method: 'POST' })
           .where(eq(webhookEndpoint.providerConfigId, data.id)),
         db.delete(providerConfig).where(eq(providerConfig.id, data.id)),
       ])
+      invalidatePublicLoginConfig()
       await audit(actor.id, 'provider.delete', 'provider', data.id)
       return { id: data.id }
     }),
@@ -1369,7 +1377,7 @@ export const adminUpdateUserFn = createServerFn({ method: 'POST' })
         .set({ ...patch, updatedAt: new Date() })
         .where(eq(user.id, id))
 
-      // 封禁或管理员降权时撤销已有会话；cookieCache 很短，剩余窗口有限
+      // 封禁或管理员降权时立即撤销已有会话（已全局关闭 cookieCache）
       if (
         (patch.banned === true && !current.banned) ||
         (patch.role === 'user' && current.role === 'admin')

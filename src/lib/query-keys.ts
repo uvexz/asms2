@@ -15,6 +15,7 @@ export interface MessageListFilters {
 
 export const queryKeys = {
   session: ['session'] as const,
+  publicSite: ['public-site'] as const,
   publicLoginConfig: ['public-login-config'] as const,
   mailboxes: ['mailboxes'] as const,
   quota: ['quota'] as const,

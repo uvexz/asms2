@@ -11,7 +11,11 @@ import {
   listMailboxesFn,
   listMessagesFn,
 } from '#/server/fns/mail'
-import { getPublicLoginConfigFn, getSessionFn } from '#/server/fns/site'
+import {
+  getPublicLoginConfigFn,
+  getPublicSiteFn,
+  getSessionFn,
+} from '#/server/fns/site'
 
 import { MAILBOX_LIST_LIMIT } from '#/lib/limits'
 import { queryKeys } from '#/lib/query-keys'
@@ -38,6 +42,13 @@ export const sessionQuery = queryOptions({
   staleTime: 30_000,
 })
 
+/** 公开站点信息：根 loader 复用 30s 缓存，避免 router.invalidate() 后无差别重拉 */
+export const publicSiteQuery = queryOptions({
+  queryKey: queryKeys.publicSite,
+  queryFn: () => getPublicSiteFn(),
+  staleTime: 30_000,
+})
+
 /** 登录方式配置只给登录/注册/设置页用，不再塞进根 loader */
 export const loginConfigQuery = queryOptions({
   queryKey: queryKeys.publicLoginConfig,
@@ -45,14 +56,7 @@ export const loginConfigQuery = queryOptions({
   staleTime: 60_000,
 })
 
-export const mailboxesQuery = queryOptions({
-  queryKey: queryKeys.mailboxes,
-  queryFn: async () => unwrap(await listMailboxesFn()),
-  staleTime: 15_000,
-  refetchInterval: 60_000,
-})
-
-/** 侧栏用无限分页:临时邮箱不设总量上限,不能只显示前 200 个。 */
+/** 侧栏邮箱列表（无限分页）：临时邮箱不设总量上限,不能只显示前 200 个。 */
 export function mailboxesInfiniteQuery() {
   return infiniteQueryOptions({
     queryKey: [...queryKeys.mailboxes, 'pages'] as const,
@@ -222,22 +226,34 @@ export async function refreshMessageFirstPage(
   return page
 }
 
+/** 新建邮箱后直接前插进无限分页缓存首页，避免整列表多页串联重取 */
+export function prependMailboxToCaches(
+  client: QueryClient,
+  created: MailboxView,
+) {
+  client.setQueryData<InfiniteData<MailboxView[]>>(
+    [...queryKeys.mailboxes, 'pages'],
+    (old) => {
+      if (!old || old.pages.length === 0) {
+        return { pages: [[created]], pageParams: [0] }
+      }
+      return {
+        ...old,
+        pages: old.pages.map((page, index) => {
+          const filtered = page.filter((item) => item.id !== created.id)
+          return index === 0 ? [created, ...filtered] : filtered
+        }),
+      }
+    },
+  )
+}
+
 /** 未读数是服务端算好的绝对值；用 delta 会在连点/重试/跨端时漂移 */
 export function setMailboxUnread(
   client: QueryClient,
   mailboxId: string,
   unreadCount: number,
 ) {
-  // 1. 同步更新普通列表缓存
-  client.setQueryData<MailboxView[]>(queryKeys.mailboxes, (old) =>
-    old
-      ? old.map((item) =>
-          item.id === mailboxId ? { ...item, unreadCount } : item,
-        )
-      : old,
-  )
-
-  // 2. 同步更新侧栏使用的无限分页缓存，使侧栏未读徽标与总未读即时刷新
   client.setQueryData<InfiniteData<MailboxView[]>>(
     [...queryKeys.mailboxes, 'pages'],
     (old) => {
@@ -259,10 +275,6 @@ export function removeMailboxFromCaches(
   client: QueryClient,
   mailboxId: string,
 ) {
-  // 从普通列表与侧栏无限列表摘除该邮箱
-  client.setQueryData<MailboxView[]>(queryKeys.mailboxes, (old) =>
-    old ? old.filter((item) => item.id !== mailboxId) : old,
-  )
   client.setQueryData<InfiniteData<MailboxView[]>>(
     [...queryKeys.mailboxes, 'pages'],
     (old) =>
@@ -355,11 +367,14 @@ export function removeMessageFromCaches(client: QueryClient, id: string) {
 
 /**
  * 退出 / 切换账号时清空用户态缓存。
- * 公开登录配置与账号无关，留着可以省掉登录后的一次重复请求。
+ * 公开站点与登录配置与账号无关，留着可以省掉登录后的一次重复请求。
  */
 export function clearUserCaches(client: QueryClient) {
+  localWrites.clear()
   client.removeQueries({
-    predicate: (query) => query.queryKey[0] !== queryKeys.publicLoginConfig[0],
+    predicate: (query) =>
+      query.queryKey[0] !== queryKeys.publicLoginConfig[0] &&
+      query.queryKey[0] !== queryKeys.publicSite[0],
   })
 }
 

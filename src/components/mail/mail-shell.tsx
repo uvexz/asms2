@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import {
@@ -138,7 +138,7 @@ function RailContent({
     }
     removeMailboxFromCaches(queryClient, deleting.id)
     setDeleting(null)
-    await queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.quota })
     // 当前列表可能包含该邮箱的邮件，刷新首页把它们去掉
     requestMailRefresh()
   }
@@ -436,7 +436,18 @@ export function MailShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate({ from: '/mail' })
   const queryClient = useQueryClient()
   const mailboxQuery = useInfiniteQuery(mailboxesInfiniteQuery())
-  const mailboxes = mailboxQuery.data?.pages.flat() ?? []
+  const mailboxes = useMemo(() => {
+    const seen = new Set<string>()
+    const result: MailboxView[] = []
+    for (const page of mailboxQuery.data?.pages ?? []) {
+      for (const item of page) {
+        if (seen.has(item.id)) continue
+        seen.add(item.id)
+        result.push(item)
+      }
+    }
+    return result
+  }, [mailboxQuery.data])
   const { site } = rootApi.useLoaderData()
   const searchRef = useRef<HTMLInputElement>(null)
 

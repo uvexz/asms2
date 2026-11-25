@@ -128,9 +128,9 @@ turso db dump <db-name> > backup-$(date +%F).sql
 ### 缓存与多实例
 
 - 站点配置（10s）、公开登录方式（60s）、Telegram Bot 配置（10s）、Auth 实例（30s 版本检查）都是**进程内缓存**，多实例 / Serverless 下不共享；写操作只失效当前进程，其它实例最多滞后一个 TTL。
-- `/mail`、`/admin`、`/settings`、认证页的 SSR HTML 由 `vite.config.ts` 的 `routeRules` 显式返回 `Cache-Control: private, no-store`，可直接放在 CDN 后面而不担心串号。
-- `/assets/*` 是带 hash 的构建产物，但应用服务器不写缓存头；请在 Nginx / CDN 层补 `Cache-Control: public, max-age=31536000, immutable`。
-- server fn 与 `/api/v1/*` 默认不带缓存头，保持私有数据不被中间层缓存；`/site.webmanifest` 为 `max-age=300`。
+- `/`、`/mail`、`/admin`、`/settings`、认证页及 `/api/**` 的响应由 `vite.config.ts` 的 `routeRules` 显式返回 `Cache-Control: private, no-store`，可直接放在 CDN 后面而不担心串号或误缓存私有数据。
+- `/assets/**` 是带 hash 的构建产物，`vite.config.ts` 的 `routeRules` 已下发 `Cache-Control: public, max-age=31536000, immutable`；网站图标（`/favicon*`、`/android-chrome*`、`/apple-touch-icon.png`）为 `public, max-age=86400`。
+- server fn 默认不带缓存头，保持私有数据不被中间层缓存；`/site.webmanifest` 为 `max-age=300`。
 - `/mail` 的首屏数据在路由 loader 里预取并随 SSR 脱水；排查"首屏只有骨架"时先确认服务端没有在 loader 阶段抛错（错误会走路由错误边界）。
 
 ## 7. 上线检查清单

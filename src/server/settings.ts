@@ -13,6 +13,7 @@ const CACHE_TTL = 10_000
 
 let cache: { value: SiteSettings; at: number } | null = null
 let inflight: Promise<SiteSettings> | null = null
+let epoch = 0
 
 async function loadSiteSettings(): Promise<SiteSettings> {
   let row = (
@@ -51,12 +52,23 @@ export async function getSiteSettings(force = false): Promise<SiteSettings> {
   }
   if (!force && inflight) return inflight
 
-  const task = loadSiteSettings()
+  if (force) {
+    epoch += 1
+    cache = null
+    inflight = null
+  }
+
+  const taskEpoch = epoch
+  const task = loadSiteSettings().then((row) => {
+    // 只有当前代际未被 force/失效推进时才回填缓存，防止慢请求覆盖新配置
+    if (taskEpoch === epoch) {
+      cache = { value: row, at: Date.now() }
+    }
+    return row
+  })
   inflight = task
   try {
-    const row = await task
-    cache = { value: row, at: Date.now() }
-    return row
+    return await task
   } finally {
     if (inflight === task) inflight = null
   }

@@ -11,8 +11,7 @@ import { DirectionProvider } from '#/components/foundations/direction/direction'
 import { Toaster } from '#/components/base/toast/toast'
 import { RouteErrorState } from '#/components/application/errors/error-state'
 import { THEME_INIT_SCRIPT } from '#/components/application/theme/theme-init'
-import { getPublicSiteFn } from '#/server/fns/site'
-import { sessionQuery } from '#/lib/api'
+import { publicSiteQuery, sessionQuery } from '#/lib/api'
 
 import TanStackQueryDevtools from '../integrations/tanstack-query/devtools'
 
@@ -47,9 +46,9 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
     const session = await context.queryClient.query(sessionQuery)
     return { session }
   },
-  loader: async () => {
-    // 站点信息直接读，失败就让错误边界暴露出来，不再静默降级成默认站点
-    const site = await getPublicSiteFn()
+  loader: async ({ context }) => {
+    // 站点信息走 query 缓存（30s），避免登录/退出等 router.invalidate() 后重复请求
+    const site = await context.queryClient.query(publicSiteQuery)
     return { site }
   },
   head: ({ loaderData }) => {

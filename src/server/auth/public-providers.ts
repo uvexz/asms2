@@ -37,12 +37,14 @@ const CACHE_TTL = 60_000
 
 let cache: { value: PublicLoginConfig; at: number } | null = null
 let inflight: Promise<PublicLoginConfig> | null = null
+let epoch = 0
 
 /** 登录页展示用的登录方式；管理员保存配置后主动失效 */
 export async function getPublicLoginConfig(): Promise<PublicLoginConfig> {
   if (cache && Date.now() - cache.at < CACHE_TTL) return cache.value
   if (inflight) return inflight
 
+  const taskEpoch = epoch
   const task = (async () => {
     // 取全部行：停用的邮箱密码方式也要能读到，避免误判为默认开启
     const [rows, settings, canSend] = await Promise.all([
@@ -73,7 +75,9 @@ export async function getPublicLoginConfig(): Promise<PublicLoginConfig> {
         })),
       passkey: { enabled: Boolean(methods.get('passkey')?.enabled) },
     }
-    cache = { value, at: Date.now() }
+    if (taskEpoch === epoch) {
+      cache = { value, at: Date.now() }
+    }
     return value
   })()
 
@@ -86,5 +90,7 @@ export async function getPublicLoginConfig(): Promise<PublicLoginConfig> {
 }
 
 export function invalidatePublicLoginConfig() {
+  epoch += 1
   cache = null
+  inflight = null
 }

@@ -19,7 +19,7 @@ import { Select, SelectItem } from '#/components/base/select/select'
 import { toast } from '#/components/base/toast/toast'
 import { Spinner } from '#/components/base/spinner/spinner'
 import { createMailboxFn } from '#/server/fns/mail'
-import { domainsQuery } from '#/lib/api'
+import { domainsQuery, prependMailboxToCaches } from '#/lib/api'
 import { queryKeys } from '#/lib/query-keys'
 import { randomNameLocalPart } from '#/lib/name-prefix'
 
@@ -101,7 +101,8 @@ export function CreateMailboxModal({
       await navigator.clipboard
         .writeText(result.data.address)
         .catch(() => undefined)
-      await queryClient.invalidateQueries({ queryKey: queryKeys.mailboxes })
+      prependMailboxToCaches(queryClient, result.data)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.quota })
       onOpenChange(false)
     } catch {
       toast.error('创建邮箱失败，请检查网络后重试')

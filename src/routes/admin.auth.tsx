@@ -142,13 +142,18 @@ function AdminAuth() {
   )
 
   async function refresh() {
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.admin.loginMethods,
-    })
-    // 登录页/找回密码页的按钮来自独立查询与根 loader，两处都要刷新
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.publicLoginConfig,
-    })
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.admin.loginMethods,
+      }),
+      // 登录页/找回密码页的按钮来自独立查询与根 loader，两处都要刷新；sessionQuery 也可能受验证开关影响
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.publicLoginConfig,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.session,
+      }),
+    ])
     await router.invalidate()
   }
 

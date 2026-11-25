@@ -51,8 +51,12 @@ const config = defineConfig({
         '/apple-touch-icon.png': {
           headers: { 'cache-control': 'public, max-age=86400' },
         },
+        // 首页 SSR 含 session 登录态按钮，禁止共享缓存避免串态
+        '/': { headers: { 'cache-control': 'private, no-store' } },
         // 个性化页面绝不进共享缓存；前面加 CDN 时也不会误缓存别人的邮箱
+        '/mail': { headers: { 'cache-control': 'private, no-store' } },
         '/mail/**': { headers: { 'cache-control': 'private, no-store' } },
+        '/admin': { headers: { 'cache-control': 'private, no-store' } },
         '/admin/**': { headers: { 'cache-control': 'private, no-store' } },
         '/settings': { headers: { 'cache-control': 'private, no-store' } },
         '/login': { headers: { 'cache-control': 'private, no-store' } },

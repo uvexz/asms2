@@ -32,12 +32,7 @@ export type AuthInstance = ReturnType<typeof betterAuth>
 type ProviderRow = typeof schema.authProvider.$inferSelect
 
 async function loadAuthProviders(): Promise<ProviderRow[]> {
-  try {
-    return await db.select().from(schema.authProvider)
-  } catch {
-    // 迁移尚未执行时不阻塞启动
-    return []
-  }
+  return db.select().from(schema.authProvider)
 }
 
 /**
@@ -112,7 +107,7 @@ const signUpEmailDomainGuard = createAuthMiddleware(async (ctx) => {
 async function buildAuth(): Promise<AuthInstance> {
   const [rows, settings] = await Promise.all([
     loadAuthProviders(),
-    getSiteSettings().catch(() => null),
+    getSiteSettings(),
   ])
   const methods = new Map(rows.map((row) => [row.providerId, row]))
   const emailRow = methods.get('email')
@@ -180,7 +175,7 @@ async function buildAuth(): Promise<AuthInstance> {
     plugins.push(
       passkey({
         rpID: url.hostname,
-        rpName: settings?.siteName ?? 'asms2',
+        rpName: settings.siteName,
         origin: url.origin,
       }),
     )
@@ -336,16 +331,25 @@ async function buildAuth(): Promise<AuthInstance> {
 let cache: { version: string; instance: AuthInstance } | null = null
 let lastCheckedAt = 0
 let resolving: Promise<AuthInstance> | null = null
+let epoch = 0
 const VERSION_TTL = 30_000
 
-async function resolveAuth(): Promise<AuthInstance> {
-  const now = Date.now()
-  const version = await getAuthConfigVersion().catch(() => '0')
-  lastCheckedAt = now
-  if (cache && cache.version === version) return cache.instance
+async function resolveAuth(taskEpoch: number): Promise<AuthInstance> {
+  const version = await getAuthConfigVersion()
+  if (taskEpoch !== epoch) {
+    return getAuth()
+  }
+  if (cache && cache.version === version) {
+    lastCheckedAt = Date.now()
+    return cache.instance
+  }
 
   const instance = await buildAuth()
+  if (taskEpoch !== epoch) {
+    return getAuth()
+  }
   cache = { version, instance }
+  lastCheckedAt = Date.now()
   await promoteBootstrapAdmin().catch(() => undefined)
   return instance
 }
@@ -355,7 +359,8 @@ export async function getAuth(): Promise<AuthInstance> {
   if (cache && now - lastCheckedAt < VERSION_TTL) return cache.instance
   if (resolving) return resolving
 
-  const task = resolveAuth()
+  const taskEpoch = epoch
+  const task = resolveAuth(taskEpoch)
   resolving = task
   try {
     return await task
@@ -365,6 +370,7 @@ export async function getAuth(): Promise<AuthInstance> {
 }
 
 export function invalidateAuthCache() {
+  epoch += 1
   lastCheckedAt = 0
   cache = null
   resolving = null

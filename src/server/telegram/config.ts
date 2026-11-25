@@ -12,22 +12,18 @@ const CACHE_TTL = 10_000
 
 let cache: { value: TelegramBotRow | null; at: number } | null = null
 let inflight: Promise<TelegramBotRow | null> | null = null
+let epoch = 0
 
 async function loadTelegramBotRow(): Promise<TelegramBotRow | null> {
-  try {
-    return (
-      (
-        await db
-          .select()
-          .from(telegramBot)
-          .where(eq(telegramBot.id, 'default'))
-          .limit(1)
-      )[0] ?? null
-    )
-  } catch {
-    // 迁移尚未执行时不阻塞启动
-    return null
-  }
+  return (
+    (
+      await db
+        .select()
+        .from(telegramBot)
+        .where(eq(telegramBot.id, 'default'))
+        .limit(1)
+    )[0] ?? null
+  )
 }
 
 /** 单行 Bot 配置；未初始化时返回 null（不做惰性建行，避免无意义的空记录） */
@@ -39,12 +35,22 @@ export async function getTelegramBotRow(
   }
   if (!force && inflight) return inflight
 
-  const task = loadTelegramBotRow()
+  if (force) {
+    epoch += 1
+    cache = null
+    inflight = null
+  }
+
+  const taskEpoch = epoch
+  const task = loadTelegramBotRow().then((row) => {
+    if (taskEpoch === epoch) {
+      cache = { value: row, at: Date.now() }
+    }
+    return row
+  })
   inflight = task
   try {
-    const row = await task
-    cache = { value: row, at: Date.now() }
-    return row
+    return await task
   } finally {
     if (inflight === task) inflight = null
   }
@@ -123,5 +129,7 @@ export async function recordTelegramError(message: string): Promise<void> {
 }
 
 export function invalidateTelegramCache() {
+  epoch += 1
   cache = null
+  inflight = null
 }

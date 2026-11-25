@@ -17,6 +17,7 @@ function AdminOverview() {
   const query = useQuery({
     queryKey: queryKeys.admin.overview,
     queryFn: async () => unwrap(await adminOverviewFn()),
+    staleTime: 5_000,
   })
 
   if (query.isLoading) {

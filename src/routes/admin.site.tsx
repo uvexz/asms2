@@ -167,12 +167,14 @@ function AdminSite() {
         return
       }
       toast.success('站点配置已保存')
-      // 根 loader 的站点信息在 SPA 内是陈旧快照，保存后主动刷新，
-      // 否则侧栏站名要等整页刷新才更新
+      // 根 loader 的站点信息走 publicSite 缓存，保存后先失效再 invalidate 路由
       queryClient.setQueryData(queryKeys.admin.site, result.data)
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.publicLoginConfig,
-      })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.publicSite }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.publicLoginConfig,
+        }),
+      ])
       await router.invalidate()
     } catch (error) {
       // 校验失败由 server fn 的 validator 抛出，不会走 result 分支

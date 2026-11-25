@@ -11,6 +11,7 @@ import {
   webhookEndpoint,
   webhookEvent,
 } from '#/db/schema'
+import { invalidatePublicLoginConfig } from '#/server/auth/public-providers'
 import { decryptSecret } from '#/server/crypto/secret-box'
 import { AppError, logError } from '#/server/errors'
 import { ingestInbound } from '#/server/mail/ingest'
@@ -258,6 +259,8 @@ async function handleComplaint(params: {
     .where(and(eq(domain.id, domainRow.id), eq(domain.sendingEnabled, true)))
     .returning({ id: domain.id })
   if (disabled.length === 0) return
+
+  invalidatePublicLoginConfig()
 
   await db.insert(auditLog).values({
     id: idPart(),

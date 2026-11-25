@@ -473,11 +473,7 @@ function randomBirthdaySuffix(): string {
 
 /** [姓，汉语拼音][名，汉语拼音][随机日期] */
 function personalCandidate(): string {
-  return (
-    pickRandom(SURNAMES) +
-    pickRandom(GIVEN_NAMES) +
-    randomBirthdaySuffix()
-  )
+  return pickRandom(SURNAMES) + pickRandom(GIVEN_NAMES) + randomBirthdaySuffix()
 }
 
 export interface RandomNamePrefixOptions {

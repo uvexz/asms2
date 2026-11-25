@@ -31,7 +31,7 @@ import { ThemeToggle } from '#/components/application/theme/theme-toggle'
 import { PageSection, KeyValue } from '#/components/admin/ui'
 import { authClient } from '#/lib/auth-client'
 import { usePowHeaders } from '#/lib/pow-client'
-import { loginConfigQuery, mailboxesQuery, quotaQuery, unwrap } from '#/lib/api'
+import { loginConfigQuery, quotaQuery, unwrap } from '#/lib/api'
 import { queryKeys } from '#/lib/query-keys'
 import { listSsoAccountsFn, unlinkSsoAccountFn } from '#/server/fns/account'
 import {
@@ -96,7 +96,6 @@ function SettingsPage() {
   const queryClient = useQueryClient()
   const { session } = Route.useRouteContext()
 
-  const mailboxes = useQuery(mailboxesQuery)
   const quota = useQuery(quotaQuery)
 
   const [name, setName] = useState(session?.name ?? '')
@@ -190,10 +189,6 @@ function SettingsPage() {
     toast.success('已吊销')
   }
 
-  const permanent = (mailboxes.data ?? []).filter(
-    (item) => item.kind === 'permanent' && item.status !== 'deleted',
-  )
-
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col gap-5 px-4 py-8">
       <div className="flex items-center justify-between">
@@ -236,21 +231,22 @@ function SettingsPage() {
       </PageSection>
 
       <PageSection title="配额">
-        {mailboxes.isError || quota.isError ? (
+        {quota.isError ? (
           <ErrorState
             compact
-            error={mailboxes.error ?? quota.error}
-            onRetry={() => {
-              void mailboxes.refetch()
-              void quota.refetch()
-            }}
+            error={quota.error}
+            onRetry={() => void quota.refetch()}
             className="py-4"
           />
         ) : (
           <div className="flex flex-col gap-1">
             <KeyValue
               label="长期邮箱"
-              value={`${permanent.length}${session?.mailboxLimit ? ` / ${session.mailboxLimit}` : ''}`}
+              value={
+                quota.data
+                  ? `${quota.data.mailboxUsed} / ${quota.data.mailboxLimit}`
+                  : '—'
+              }
             />
             <KeyValue
               label="今日发件"

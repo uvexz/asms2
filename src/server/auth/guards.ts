@@ -21,12 +21,7 @@ export interface SessionUser {
   sendLimit?: number | null
 }
 
-export async function getSession() {
-  const auth = await getAuth()
-  return auth.api.getSession({ headers: getRequestHeaders() })
-}
-
-/** 跳过 cookieCache，用于管理员权限等不能接受缓存延迟的校验 */
+/** 从数据库读取当前最新会话（Better Auth 全局已禁用 cookieCache） */
 export async function getFreshSession() {
   const auth = await getAuth()
   return auth.api.getSession({
@@ -36,8 +31,7 @@ export async function getFreshSession() {
 }
 
 export async function requireUser(): Promise<SessionUser> {
-  // 不走 cookieCache:封禁、降权、密码重置后要让旧 cookie 立即失效,
-  // 不能给被处置账号留下最长 60 秒的读写窗口。
+  // 面板服务端函数每次都走 DB 校验：封禁、降权、密码重置后旧 cookie 必须立即失效。
   const session = await getFreshSession().catch(() => null)
   if (!session?.user) {
     throw new AppError('unauthorized', '请先登录', 401)
@@ -85,7 +79,7 @@ export function clientIp(): string | undefined {
 
 export function userAgent(): string | undefined {
   try {
-    return getRequestHeader('user-agent')
+    return getRequestHeader('user-agent')?.slice(0, 200) ?? undefined
   } catch {
     return undefined
   }

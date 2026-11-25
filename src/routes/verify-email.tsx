@@ -16,6 +16,7 @@ import { Button } from '#/components/base/buttons/button'
 import { toast } from '#/components/base/toast/toast'
 import { ThemeCorner } from '#/components/application/theme/theme-corner'
 import { authClient } from '#/lib/auth-client'
+import { queryKeys } from '#/lib/query-keys'
 import { performSignOut } from '#/lib/sign-out'
 import { usePowHeaders } from '#/lib/pow-client'
 import { PowStatusLine } from '#/components/application/auth/pow-status'
@@ -54,7 +55,7 @@ function VerifyEmailPage() {
     return () => clearTimeout(timer)
   }, [cooldown])
 
-  // 点完邮件里的链接回来时，cookieCache 可能还是旧值，强制取一次最新会话
+  // 点完邮件里的链接回来时，刷新会话缓存再跳走，避免路由守卫命中旧的 sessionQuery
   useEffect(() => {
     if (verified !== '1') return
     void (async () => {
@@ -62,10 +63,12 @@ function VerifyEmailPage() {
         query: { disableCookieCache: true },
       })
       if (result.data?.user.emailVerified) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.session })
+        await router.invalidate()
         await navigate({ to: '/mail', search: { folder: 'inbox' } })
       }
     })()
-  }, [verified, navigate])
+  }, [verified, navigate, queryClient, router])
 
   async function resend() {
     setSending(true)

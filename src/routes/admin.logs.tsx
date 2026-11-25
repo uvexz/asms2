@@ -37,6 +37,7 @@ function AdminLogs() {
     queryFn: async () =>
       unwrap(await adminListAuditFn({ data: { limit: PAGE_SIZE, offset } })),
     enabled: tab === 'audit',
+    staleTime: 5_000,
   })
   const events = useQuery({
     queryKey: queryKeys.admin.webhookEvents(offset),
@@ -45,12 +46,14 @@ function AdminLogs() {
         await adminListWebhookEventsFn({ data: { limit: PAGE_SIZE, offset } }),
       ),
     enabled: tab === 'webhook',
+    staleTime: 5_000,
   })
   const unrouted = useQuery({
     queryKey: queryKeys.admin.unrouted(offset),
     queryFn: async () =>
       unwrap(await adminListUnroutedFn({ data: { limit: PAGE_SIZE, offset } })),
     enabled: tab === 'unrouted',
+    staleTime: 5_000,
   })
 
   const active = tab === 'audit' ? audit : tab === 'webhook' ? events : unrouted

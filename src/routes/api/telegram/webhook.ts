@@ -21,7 +21,13 @@ export const Route = createFileRoute('/api/telegram/webhook')({
       GET: async () =>
         new Response(null, { status: 405, headers: { allow: 'POST' } }),
       POST: async ({ request }) => {
-        const runtime = await getTelegramRuntime()
+        let runtime: Awaited<ReturnType<typeof getTelegramRuntime>>
+        try {
+          runtime = await getTelegramRuntime()
+        } catch (error) {
+          logError('[telegram] webhook runtime failed:', error)
+          return new Response('internal error', { status: 500 })
+        }
         if (!runtime || !runtime.webhookSecret) {
           return new Response('not found', { status: 404 })
         }

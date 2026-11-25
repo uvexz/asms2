@@ -16,7 +16,11 @@ import {
   removeMailbox,
 } from '#/server/mail/mailbox'
 import { getMessage, listMessages, updateMessage } from '#/server/mail/message'
-import { getSendUsage, usageDateFor } from '#/server/mail/quota'
+import {
+  getPermanentMailboxCount,
+  getSendUsage,
+  usageDateFor,
+} from '#/server/mail/quota'
 import { sendMail } from '#/server/mail/send'
 import { getSiteSettings } from '#/server/settings'
 
@@ -117,7 +121,16 @@ export const getQuotaFn = createServerFn({ method: 'GET' }).handler(async () =>
   attempt(async () => {
     const user = await requireVerifiedUser()
     const settings = await getSiteSettings()
-    const limit = user.sendLimit ?? settings.defaultDailySendLimit
-    return getSendUsage(user.id, limit, usageDateFor(settings.timezone))
+    const sendLimit = user.sendLimit ?? settings.defaultDailySendLimit
+    const mailboxLimit = user.mailboxLimit ?? settings.defaultMailboxLimit
+    const [sendUsage, mailboxUsed] = await Promise.all([
+      getSendUsage(user.id, sendLimit, usageDateFor(settings.timezone)),
+      getPermanentMailboxCount(user.id),
+    ])
+    return {
+      ...sendUsage,
+      mailboxUsed,
+      mailboxLimit,
+    }
   }),
 )

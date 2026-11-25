@@ -1,12 +1,13 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, ne, sql } from 'drizzle-orm'
 import { customAlphabet } from 'nanoid'
 
 import { db } from '#/db/client'
-import { dailyUsage } from '#/db/schema'
+import { dailyUsage, mailbox } from '#/db/schema'
 import { safeTimeZone } from '#/lib/timezone'
 
 const idPart = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 20)
 
+const MAX_DATE_FORMATTERS = 64
 const dateFormatters = new Map<string, Intl.DateTimeFormat>()
 
 function dateFormatterFor(timezone: string) {
@@ -14,6 +15,9 @@ function dateFormatterFor(timezone: string) {
   const zone = safeTimeZone(timezone)
   let formatter = dateFormatters.get(zone)
   if (!formatter) {
+    if (dateFormatters.size >= MAX_DATE_FORMATTERS) {
+      dateFormatters.clear()
+    }
     formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: zone,
       year: 'numeric',
@@ -86,4 +90,23 @@ export async function getSendUsage(
     limit,
     remaining: Math.max(limit - sent, 0),
   }
+}
+
+/** 精确统计用户当前未删除的长期邮箱数，不受侧栏列表分页上限影响 */
+export async function getPermanentMailboxCount(
+  userId: string,
+): Promise<number> {
+  const row = (
+    await db
+      .select({ count: sql<number>`count(*)` })
+      .from(mailbox)
+      .where(
+        and(
+          eq(mailbox.userId, userId),
+          eq(mailbox.kind, 'permanent'),
+          ne(mailbox.status, 'deleted'),
+        ),
+      )
+  ).at(0)
+  return Number(row?.count ?? 0)
 }

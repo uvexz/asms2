@@ -84,7 +84,11 @@ function AdminDomains() {
   })
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.admin.domains })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.domains }),
+      queryClient.invalidateQueries({ queryKey: ['domains'] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.publicLoginConfig }),
+    ])
   }
 
   async function verify(id: string) {
